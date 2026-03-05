@@ -19,6 +19,19 @@ if (-not (Test-Path -LiteralPath $htmlDir)) {
     New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null
 }
 
+function Write-AtomicFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Content
+    )
+
+    $tmp = "$Path.tmp"
+    Set-Content -LiteralPath $tmp -Value $Content -NoNewline
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
 $lastGood = $null
 
 while ($true) {
@@ -46,9 +59,9 @@ while ($true) {
     }
 
     if ($isStale) {
-        Set-Content -LiteralPath $OutputFile -Value ("[STALE] " + $displayValue) -NoNewline
+        Write-AtomicFile -Path $OutputFile -Content ("[STALE] " + $displayValue)
     } else {
-        Set-Content -LiteralPath $OutputFile -Value $displayValue -NoNewline
+        Write-AtomicFile -Path $OutputFile -Content $displayValue
     }
 
     $color = if ($isStale) { "#ffd24a" } else { "#ffffff" }
@@ -85,7 +98,7 @@ while ($true) {
 <body>$displayValue</body>
 </html>
 "@
-    Set-Content -LiteralPath $HtmlOutputFile -Value $html -NoNewline
+    Write-AtomicFile -Path $HtmlOutputFile -Content $html
 
     if ($Once) {
         break
