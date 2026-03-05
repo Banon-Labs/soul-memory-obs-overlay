@@ -1,0 +1,13 @@
+[package]
+name = "overlay-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+overlay-proto = { path = "../overlay-proto" }
+
+[target.'cfg(windows)'.dependencies]
+obs-wrapper = "0.4"
