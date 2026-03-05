@@ -31,3 +31,7 @@ Use the helper + bridge script with OBS Text/Browser sources.
 
 - `config/overlay.toml` already includes working candidate chains.
 - `GameManagerImp` is auto-resolved from CE-derived AOB logic.
+- Bridge regression test:
+  ```powershell
+  .\scripts\test-obs-text-bridge.ps1
+  ```
