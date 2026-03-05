@@ -1,0 +1,20 @@
+[process]
+exe = "DarkSoulsII.exe"
+
+[memory]
+module = "DarkSoulsII.exe"
+base_offset = 0
+pointer_offsets = [0]
+game_manager_imp = 0
+soul_memory_chains = [[208, 1168, 244], [208, 1168, 252]]
+
+[signature]
+enabled = true
+pattern = "AA BB ?? CC"
+relative_offset = 0
+
+[ipc]
+pipe_name = "SoulMemoryOverlay"
+
+[poll]
+interval_ms = 60000
