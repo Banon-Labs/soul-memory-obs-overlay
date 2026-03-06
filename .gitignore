@@ -3,3 +3,4 @@
 /overlay/soul-memory.txt
 /overlay/soul-memory.html
 /overlay/*.tmp
+/scripts/__pycache__/
