@@ -27,9 +27,25 @@ function Write-AtomicFile {
         [string]$Content
     )
 
-    $tmp = "$Path.tmp"
-    Set-Content -LiteralPath $tmp -Value $Content -NoNewline
-    Move-Item -LiteralPath $tmp -Destination $Path -Force
+    $tmp = "$Path.$PID.tmp"
+
+    try {
+        Set-Content -LiteralPath $tmp -Value $Content -NoNewline
+        Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
+        return $true
+    } catch {
+        try {
+            # Fallback for cases where atomic replace is denied on UNC/OBS file handles.
+            Set-Content -LiteralPath $Path -Value $Content -NoNewline
+            return $true
+        } catch {
+            return $false
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tmp) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 $lastGood = $null
@@ -59,9 +75,9 @@ while ($true) {
     }
 
     if ($isStale) {
-        Write-AtomicFile -Path $OutputFile -Content ("[STALE] " + $displayValue)
+        [void](Write-AtomicFile -Path $OutputFile -Content ("[STALE] " + $displayValue))
     } else {
-        Write-AtomicFile -Path $OutputFile -Content $displayValue
+        [void](Write-AtomicFile -Path $OutputFile -Content $displayValue)
     }
 
     $color = if ($isStale) { "#ffd24a" } else { "#ffffff" }
@@ -98,7 +114,7 @@ while ($true) {
 <body>$displayValue</body>
 </html>
 "@
-    Write-AtomicFile -Path $HtmlOutputFile -Content $html
+    [void](Write-AtomicFile -Path $HtmlOutputFile -Content $html)
 
     if ($Once) {
         break

@@ -80,6 +80,15 @@ try {
         Assert-Contains $htmlText "<body>" "loop html missing <body>"
     }
 
+    # Bridge should not crash if an output file is temporarily locked.
+    $lock = [System.IO.File]::Open($html, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+    try {
+        & $BridgeScript -HelperExe $HelperExe -Config $Config -OutputFile $txt -HtmlOutputFile $html -Once
+    }
+    finally {
+        $lock.Dispose()
+    }
+
     Write-Output "PASS: bridge stale/fresh and html integrity checks"
 }
 finally {
