@@ -10,7 +10,7 @@ soul_memory_chains = [[208, 1168, 244], [208, 1168, 252]]
 
 [signature]
 enabled = true
-pattern = "AA BB ?? CC"
+pattern = "48 8B 05 ?? ?? ?? ?? 48 8B 58 38 48 85 DB 74 ?? F6"
 relative_offset = 0
 
 [ipc]
