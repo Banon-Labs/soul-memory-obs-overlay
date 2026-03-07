@@ -1,7 +1,9 @@
+use interprocess::local_socket::{
+    prelude::LocalSocketStream, traits::Listener, GenericNamespaced, ListenerOptions, ToNsName,
+};
 use overlay_proto::{OverlayConfig, OverlayMessage};
 use std::fs;
 use std::io::{self, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -50,6 +52,67 @@ impl MemoryReader for ProcessMemoryReader {
     }
 }
 
+pub trait PointerChainMemory {
+    fn read_u64(&self, address: u64) -> Result<u64, String>;
+    fn read_u32(&self, address: u64) -> Result<u32, String>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PointerChainError {
+    EmptyChain,
+    CharacterUnavailable,
+    AddressOverflow,
+    ReadFailed(String),
+    ValueOutOfRange,
+}
+
+pub fn resolve_pointer_chain_i32(
+    memory: &dyn PointerChainMemory,
+    base: u64,
+    chain: &[u64],
+    initial_deref: bool,
+) -> Result<i32, PointerChainError> {
+    if chain.is_empty() {
+        return Err(PointerChainError::EmptyChain);
+    }
+
+    let mut ptr = if initial_deref {
+        let p = memory
+            .read_u64(base)
+            .map_err(PointerChainError::ReadFailed)?;
+        if p == 0 {
+            return Err(PointerChainError::CharacterUnavailable);
+        }
+        p
+    } else {
+        base
+    };
+
+    if chain.len() > 1 {
+        for offset in &chain[..chain.len() - 1] {
+            let addr = ptr
+                .checked_add(*offset)
+                .ok_or(PointerChainError::AddressOverflow)?;
+            let next = memory
+                .read_u64(addr)
+                .map_err(PointerChainError::ReadFailed)?;
+            if next == 0 {
+                return Err(PointerChainError::CharacterUnavailable);
+            }
+            ptr = next;
+        }
+    }
+
+    let value_addr = ptr
+        .checked_add(*chain.last().expect("chain is non-empty"))
+        .ok_or(PointerChainError::AddressOverflow)?;
+    let value_u32 = memory
+        .read_u32(value_addr)
+        .map_err(PointerChainError::ReadFailed)?;
+
+    i32::try_from(value_u32).map_err(|_| PointerChainError::ValueOutOfRange)
+}
+
 #[cfg(windows)]
 fn candidate_chains(cfg: &OverlayConfig) -> Vec<Vec<u64>> {
     if let Some(chains) = &cfg.memory.soul_memory_chains {
@@ -96,17 +159,12 @@ mod windows_reader {
         MODULEENTRY32W, PROCESSENTRY32W, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
         TH32CS_SNAPPROCESS,
     };
+    use windows_sys::Win32::System::Memory::{
+        VirtualQueryEx, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_GUARD, PAGE_NOACCESS,
+    };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
     };
-
-    const GAME_MANAGER_AOB: &str = "48 8B 05 ?? ?? ?? ?? 48 8B 58 38 48 85 DB 74 ?? F6";
-
-    #[derive(Debug)]
-    enum ChainError {
-        CharacterUnavailable,
-        Generic(String),
-    }
 
     #[derive(Clone, Debug)]
     struct CandidateHit {
@@ -159,12 +217,10 @@ mod windows_reader {
                                 initial_deref,
                                 value,
                             }),
-                            Err(ChainError::CharacterUnavailable) => {
+                            Err(PointerChainError::CharacterUnavailable) => {
                                 had_character_unavailable = true
                             }
-                            Err(ChainError::Generic(err)) => {
-                                other_errors.push(format!("pid {pid}: {err}"))
-                            }
+                            Err(err) => other_errors.push(format!("pid {pid}: {err:?}")),
                         }
                     }
                 }
@@ -239,13 +295,13 @@ mod windows_reader {
                                 "ok pid={pid} base=0x{base:X} chain=[{chain_hex}] deref={} value={v}",
                                 initial_deref
                             )),
-                            Err(ChainError::CharacterUnavailable) => out.push(format!(
+                            Err(PointerChainError::CharacterUnavailable) => out.push(format!(
                                 "unavailable pid={pid} base=0x{base:X} chain=[{chain_hex}] deref={}",
                                 initial_deref
                             )),
-                            Err(ChainError::Generic(e)) => out.push(format!(
+                            Err(e) => out.push(format!(
                                 "err pid={pid} base=0x{base:X} chain=[{chain_hex}] deref={} msg={}",
-                                initial_deref, e
+                                initial_deref, format!("{e:?}")
                             )),
                         }
                     }
@@ -300,33 +356,86 @@ mod windows_reader {
         process: &ProcessHandle,
         cfg: &OverlayConfig,
     ) -> Result<Vec<u64>, String> {
+        let mut out: Vec<u64> = Vec::new();
+        let mut primary_error: Option<String> = None;
+
         if let Some(addr) = cfg.memory.game_manager_imp {
             if addr > 0 {
-                return Ok(vec![addr]);
+                out.push(addr);
             }
         }
 
         if cfg.memory.base_offset > 0 {
             let module_base = find_module_base(process.pid, &cfg.memory.module)
-                .ok_or_else(|| format!("module '{}' not found in process", cfg.memory.module))?;
-            let base = module_base
-                .checked_add(cfg.memory.base_offset)
-                .ok_or_else(|| "base address overflow while applying base_offset".to_string());
-            return base.map(|b| vec![b]);
+                .ok_or_else(|| format!("module '{}' not found in process", cfg.memory.module));
+
+            match module_base {
+                Ok(module_base) => {
+                    let base =
+                        module_base
+                            .checked_add(cfg.memory.base_offset)
+                            .ok_or_else(|| {
+                                "base address overflow while applying base_offset".to_string()
+                            })?;
+                    if !out.contains(&base) {
+                        out.push(base);
+                    }
+                }
+                Err(err) => {
+                    primary_error = Some(err);
+                }
+            }
         }
 
-        resolve_game_manager_by_aob(process, &cfg.memory.module)
+        if cfg.signature.enabled {
+            match resolve_game_manager_by_aob(
+                process,
+                &cfg.memory.module,
+                &cfg.signature.pattern,
+                cfg.signature.relative_offset,
+            ) {
+                Ok(sig_bases) => {
+                    for base in sig_bases {
+                        if !out.contains(&base) {
+                            out.push(base);
+                        }
+                    }
+                }
+                Err(err) => {
+                    if out.is_empty() {
+                        return match primary_error {
+                            Some(primary) => {
+                                Err(format!("{primary}; signature fallback failed: {err}"))
+                            }
+                            None => Err(err),
+                        };
+                    }
+                }
+            }
+        }
+
+        if out.is_empty() {
+            if let Some(err) = primary_error {
+                Err(err)
+            } else {
+                Err("no configured game manager base and signature fallback disabled".to_string())
+            }
+        } else {
+            Ok(out)
+        }
     }
 
     fn resolve_game_manager_by_aob(
         process: &ProcessHandle,
         module_name: &str,
+        aob_pattern: &str,
+        relative_offset: i64,
     ) -> Result<Vec<u64>, String> {
         let module = find_module_info(process.pid, module_name)
             .ok_or_else(|| format!("module '{}' not found in process", module_name))?;
 
-        let bytes = read_region(process.handle, module.base, module.size as usize)?;
-        let pattern = parse_aob(GAME_MANAGER_AOB)?;
+        let bytes = read_module_bytes(process.handle, module.base, module.size as usize)?;
+        let pattern = parse_aob(aob_pattern)?;
 
         let hits = find_pattern_all(&bytes, &pattern);
         if hits.is_empty() {
@@ -350,6 +459,7 @@ mod windows_reader {
             let Some(target) = (instr_addr as i64)
                 .checked_add(7)
                 .and_then(|v| v.checked_add(disp))
+                .and_then(|v| v.checked_add(relative_offset))
             else {
                 continue;
             };
@@ -366,46 +476,90 @@ mod windows_reader {
         Ok(out)
     }
 
+    fn read_module_bytes(
+        handle: HANDLE,
+        module_base: u64,
+        module_size: usize,
+    ) -> Result<Vec<u8>, String> {
+        let module_end = module_base
+            .checked_add(module_size as u64)
+            .ok_or_else(|| "module range overflow while scanning memory".to_string())?;
+
+        let mut out = vec![0u8; module_size];
+        let mut cursor = module_base;
+
+        while cursor < module_end {
+            let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { zeroed() };
+            let queried = unsafe {
+                VirtualQueryEx(
+                    handle,
+                    cursor as *const c_void,
+                    &mut mbi,
+                    size_of::<MEMORY_BASIC_INFORMATION>(),
+                )
+            };
+
+            if queried == 0 {
+                return Err(format!(
+                    "VirtualQueryEx failed while scanning module at 0x{cursor:016X}"
+                ));
+            }
+
+            let region_base = mbi.BaseAddress as usize as u64;
+            let region_size = mbi.RegionSize;
+            if region_size == 0 {
+                return Err("VirtualQueryEx returned zero-sized region".to_string());
+            }
+
+            let region_end = region_base.saturating_add(region_size as u64);
+            let overlaps_module = region_end > module_base && region_base < module_end;
+            let is_readable = mbi.State == MEM_COMMIT
+                && (mbi.Protect & PAGE_NOACCESS) == 0
+                && (mbi.Protect & PAGE_GUARD) == 0;
+
+            if overlaps_module && is_readable {
+                let read_start = region_base.max(module_base);
+                let read_end = region_end.min(module_end);
+                if read_end > read_start {
+                    let len = (read_end - read_start) as usize;
+                    if let Ok(chunk) = read_region(handle, read_start, len) {
+                        let dst_offset = (read_start - module_base) as usize;
+                        let copy_len = chunk.len().min(len);
+                        out[dst_offset..dst_offset + copy_len].copy_from_slice(&chunk[..copy_len]);
+                    }
+                }
+            }
+
+            cursor = region_end;
+        }
+
+        Ok(out)
+    }
+
     fn read_chain_value(
         process: &ProcessHandle,
         base: u64,
         chain: &[u64],
         initial_deref: bool,
-    ) -> Result<i32, ChainError> {
-        if chain.is_empty() {
-            return Err(ChainError::Generic("empty candidate chain".to_string()));
+    ) -> Result<i32, PointerChainError> {
+        struct ProcessMemoryView {
+            handle: HANDLE,
         }
 
-        let mut ptr = if initial_deref {
-            let p = read_u64(process.handle, base).map_err(ChainError::Generic)?;
-            if p == 0 {
-                return Err(ChainError::CharacterUnavailable);
+        impl PointerChainMemory for ProcessMemoryView {
+            fn read_u64(&self, address: u64) -> Result<u64, String> {
+                read_u64(self.handle, address)
             }
-            p
-        } else {
-            base
+
+            fn read_u32(&self, address: u64) -> Result<u32, String> {
+                read_u32(self.handle, address)
+            }
+        }
+
+        let view = ProcessMemoryView {
+            handle: process.handle,
         };
-
-        if chain.len() > 1 {
-            for offset in &chain[..chain.len() - 1] {
-                let addr = ptr.checked_add(*offset).ok_or_else(|| {
-                    ChainError::Generic("address overflow while resolving chain".to_string())
-                })?;
-                let next = read_u64(process.handle, addr).map_err(ChainError::Generic)?;
-                if next == 0 {
-                    return Err(ChainError::CharacterUnavailable);
-                }
-                ptr = next;
-            }
-        }
-
-        let value_addr = ptr.checked_add(*chain.last().unwrap()).ok_or_else(|| {
-            ChainError::Generic("address overflow while resolving value address".to_string())
-        })?;
-
-        let value_u32 = read_u32(process.handle, value_addr).map_err(ChainError::Generic)?;
-        i32::try_from(value_u32)
-            .map_err(|_| ChainError::Generic("soul memory value exceeds i32 range".to_string()))
+        resolve_pointer_chain_i32(&view, base, chain, initial_deref)
     }
 
     fn find_process_ids(exe_name: &str) -> Vec<u32> {
@@ -649,6 +803,7 @@ pub fn run_loop(
 ) -> io::Result<()> {
     loop {
         let msg = build_message(reader, cfg, now_ms());
+        log_overlay_message(&msg);
         let line = msg
             .to_line()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
@@ -663,27 +818,40 @@ pub fn run_loop(
     }
 }
 
-pub fn pipe_name_to_port(pipe_name: &str) -> u16 {
-    let mut hash: u32 = 2166136261;
-    for b in pipe_name.as_bytes() {
-        hash ^= *b as u32;
-        hash = hash.wrapping_mul(16777619);
-    }
-    40000 + (hash % 20000) as u16
-}
-
-pub fn run_tcp_server(
+pub fn run_pipe_server(
     reader: &mut dyn MemoryReader,
     cfg: &OverlayConfig,
     once: bool,
 ) -> io::Result<()> {
-    let port = pipe_name_to_port(&cfg.ipc.pipe_name);
-    let bind_addr = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&bind_addr)?;
+    let name = cfg
+        .ipc
+        .pipe_name
+        .as_str()
+        .to_ns_name::<GenericNamespaced>()
+        .map_err(io::Error::other)?;
+    let listener = ListenerOptions::new().name(name).create_sync()?;
+    log_stderr(&format!(
+        "named pipe server listening on {}",
+        cfg.ipc.pipe_name
+    ));
 
     loop {
-        let (mut stream, _) = listener.accept()?;
-        emit_to_client(reader, cfg, &mut stream, once)?;
+        let mut stream = match listener.accept() {
+            Ok(stream) => {
+                log_stderr("pipe client connected");
+                stream
+            }
+            Err(err) => {
+                log_stderr(&format!("pipe accept failed: {err}"));
+                thread::sleep(Duration::from_millis(250));
+                continue;
+            }
+        };
+
+        if let Err(err) = emit_to_client(reader, cfg, &mut stream, once) {
+            log_stderr(&format!("pipe client disconnected: {err}"));
+        }
+
         if once {
             return Ok(());
         }
@@ -693,11 +861,12 @@ pub fn run_tcp_server(
 fn emit_to_client(
     reader: &mut dyn MemoryReader,
     cfg: &OverlayConfig,
-    stream: &mut TcpStream,
+    stream: &mut LocalSocketStream,
     once: bool,
 ) -> io::Result<()> {
     loop {
         let msg = build_message(reader, cfg, now_ms());
+        log_overlay_message(&msg);
         let line = msg
             .to_line()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
@@ -712,9 +881,31 @@ fn emit_to_client(
     }
 }
 
+fn log_overlay_message(msg: &OverlayMessage) {
+    if let Some(err) = &msg.error {
+        log_stderr(&format!("memory read error: {err}"));
+    }
+}
+
+fn log_stderr(message: &str) {
+    let ms = now_ms();
+    let secs = ms / 1000;
+    let millis = ms % 1000;
+    eprintln!("[{secs}.{millis:03}] {message}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use interprocess::local_socket::{
+        prelude::LocalSocketStream, traits::Stream, GenericNamespaced, ToNsName,
+    };
+    use std::collections::HashMap;
+    use std::{
+        io::{BufRead, BufReader},
+        thread,
+        time::Duration,
+    };
 
     fn cfg() -> OverlayConfig {
         OverlayConfig::from_toml(
@@ -740,6 +931,95 @@ interval_ms = 1
 "#,
         )
         .expect("valid config")
+    }
+
+    fn cfg_with_pipe(pipe_name: &str) -> OverlayConfig {
+        OverlayConfig::from_toml(&format!(
+            r#"
+[process]
+exe = "missing.exe"
+
+[memory]
+module = "missing.exe"
+base_offset = 0
+pointer_offsets = [0]
+
+[signature]
+enabled = true
+pattern = "AA BB ?? CC"
+relative_offset = 0
+
+[ipc]
+pipe_name = "{pipe_name}"
+
+[poll]
+interval_ms = 1
+"#
+        ))
+        .expect("valid config")
+    }
+
+    #[derive(Default)]
+    struct MockPointerMemory {
+        u64_values: HashMap<u64, u64>,
+        u32_values: HashMap<u64, u32>,
+    }
+
+    impl PointerChainMemory for MockPointerMemory {
+        fn read_u64(&self, address: u64) -> Result<u64, String> {
+            self.u64_values
+                .get(&address)
+                .copied()
+                .ok_or_else(|| format!("missing u64 at 0x{address:X}"))
+        }
+
+        fn read_u32(&self, address: u64) -> Result<u32, String> {
+            self.u32_values
+                .get(&address)
+                .copied()
+                .ok_or_else(|| format!("missing u32 at 0x{address:X}"))
+        }
+    }
+
+    #[test]
+    fn pointer_chain_resolves_with_initial_deref() {
+        let mut mem = MockPointerMemory::default();
+        mem.u64_values.insert(0x1000, 0x2000);
+        mem.u64_values.insert(0x2010, 0x3000);
+        mem.u32_values.insert(0x3020, 12345);
+
+        let value = resolve_pointer_chain_i32(&mem, 0x1000, &[0x10, 0x20], true)
+            .expect("pointer chain resolves");
+        assert_eq!(value, 12_345);
+    }
+
+    #[test]
+    fn pointer_chain_resolves_without_initial_deref() {
+        let mut mem = MockPointerMemory::default();
+        mem.u64_values.insert(0x1010, 0x3000);
+        mem.u32_values.insert(0x3020, 777);
+
+        let value =
+            resolve_pointer_chain_i32(&mem, 0x1000, &[0x10, 0x20], false).expect("chain resolves");
+        assert_eq!(value, 777);
+    }
+
+    #[test]
+    fn pointer_chain_reports_character_unavailable_for_null_pointer() {
+        let mut mem = MockPointerMemory::default();
+        mem.u64_values.insert(0x1000, 0);
+
+        let err = resolve_pointer_chain_i32(&mem, 0x1000, &[0x10, 0x20], true)
+            .expect_err("null pointer should fail");
+        assert_eq!(err, PointerChainError::CharacterUnavailable);
+    }
+
+    #[test]
+    fn pointer_chain_reports_empty_chain() {
+        let mem = MockPointerMemory::default();
+        let err = resolve_pointer_chain_i32(&mem, 0x1000, &[], true)
+            .expect_err("empty chain should fail");
+        assert_eq!(err, PointerChainError::EmptyChain);
     }
 
     #[test]
@@ -769,10 +1049,83 @@ interval_ms = 1
     }
 
     #[test]
-    fn pipe_name_maps_to_stable_port() {
-        assert_eq!(
-            pipe_name_to_port("SoulMemoryOverlay"),
-            pipe_name_to_port("SoulMemoryOverlay")
-        );
+    fn named_pipe_ipc_integration_emits_json_line() {
+        let pipe_name = format!("SoulMemoryOverlayTest{}", now_ms());
+        let cfg = cfg_with_pipe(&pipe_name);
+
+        let client = thread::spawn(move || {
+            for _ in 0..100 {
+                let namespaced = pipe_name
+                    .as_str()
+                    .to_ns_name::<GenericNamespaced>()
+                    .expect("valid namespaced pipe name");
+                if let Ok(stream) = LocalSocketStream::connect(namespaced) {
+                    let mut reader = BufReader::new(stream);
+                    let mut line = String::new();
+                    let bytes = reader.read_line(&mut line).expect("read from named pipe");
+                    assert!(bytes > 0, "named pipe returned a payload line");
+                    let parsed =
+                        overlay_proto::OverlayMessage::from_line(&line).expect("json line");
+                    assert_eq!(parsed.value, Some(44));
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+
+            panic!("client connected to helper named pipe");
+        });
+
+        let mut reader = MockMemoryReader::new(44);
+        let server_result = run_pipe_server(&mut reader, &cfg, true);
+        assert!(server_result.is_ok(), "server completed cleanly");
+
+        client.join().expect("client thread join");
+    }
+
+    #[test]
+    fn ipc_client_reconnects_after_server_restart() {
+        let pipe_name = format!("SoulMemoryOverlayReconnect{}", now_ms());
+
+        for expected in [51, 52] {
+            let cfg = cfg_with_pipe(&pipe_name);
+            let server_cfg = cfg.clone();
+            let server = thread::spawn(move || {
+                let mut reader = MockMemoryReader::new(expected);
+                run_pipe_server(&mut reader, &server_cfg, true)
+            });
+
+            let mut stream = None;
+            for _ in 0..100 {
+                let namespaced = pipe_name
+                    .as_str()
+                    .to_ns_name::<GenericNamespaced>()
+                    .expect("valid namespaced pipe name");
+                if let Ok(candidate) = LocalSocketStream::connect(namespaced) {
+                    stream = Some(candidate);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+
+            let stream = stream.expect("client connected to helper named pipe");
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).expect("read from named pipe");
+            assert!(bytes > 0, "named pipe returned a payload line");
+
+            let parsed = overlay_proto::OverlayMessage::from_line(&line).expect("json line");
+            assert_eq!(parsed.value, Some(expected));
+
+            let server_result = server.join().expect("server thread join");
+            assert!(server_result.is_ok(), "server completed cleanly");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn log_timestamp_monotonic_now_ms() {
+        let first = now_ms();
+        let second = now_ms();
+        assert!(second >= first);
     }
 }

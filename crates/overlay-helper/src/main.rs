@@ -1,5 +1,5 @@
 use clap::Parser;
-use overlay_helper::{debug_probe, load_config, run_loop, run_tcp_server, ProcessMemoryReader};
+use overlay_helper::{debug_probe, load_config, run_loop, run_pipe_server, ProcessMemoryReader};
 use std::io;
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     once: bool,
     #[arg(long, default_value_t = false)]
-    tcp: bool,
+    stdout: bool,
     #[arg(long, default_value_t = false)]
     debug_probe: bool,
 }
@@ -34,9 +34,9 @@ fn main() -> io::Result<()> {
     }
 
     let mut reader = ProcessMemoryReader;
-    if cli.tcp {
-        run_tcp_server(&mut reader, &cfg, cli.once)
-    } else {
+    if cli.stdout {
         run_loop(&mut reader, &cfg, &mut io::stdout(), cli.once)
+    } else {
+        run_pipe_server(&mut reader, &cfg, cli.once)
     }
 }
