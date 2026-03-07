@@ -10,4 +10,5 @@ crate-type = ["cdylib", "rlib"]
 overlay-proto = { path = "../overlay-proto" }
 
 [target.'cfg(windows)'.dependencies]
+interprocess = "2"
 obs-wrapper = "0.4"

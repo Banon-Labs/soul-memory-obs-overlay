@@ -543,6 +543,7 @@ dependencies = [
 name = "overlay-plugin"
 version = "0.1.0"
 dependencies = [
+ "interprocess",
  "obs-wrapper",
  "overlay-proto",
 ]
