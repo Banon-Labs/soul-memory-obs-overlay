@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "soul_memory_obs_overlay",
+  "project_id": "b2c613a1-cc6f-42c5-ad0e-da2e752c2f47"
+}

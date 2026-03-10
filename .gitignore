@@ -4,3 +4,7 @@
 /overlay/soul-memory.html
 /overlay/*.tmp
 /scripts/__pycache__/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
