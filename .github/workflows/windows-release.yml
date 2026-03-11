@@ -39,6 +39,7 @@ jobs:
 
           $searchRoots = @(
             "$env:ChocolateyInstall/lib",
+            "C:/ProgramData",
             "C:/Program Files/obs-studio",
             "C:/Program Files (x86)/obs-studio"
           )
@@ -49,6 +50,10 @@ jobs:
               $obsLib = Get-ChildItem $root -Recurse -Filter obs.lib -ErrorAction SilentlyContinue | Select-Object -First 1
               if ($obsLib) { break }
             }
+          }
+
+          if (-not $obsLib) {
+            $obsLib = Get-ChildItem "C:/" -Recurse -Filter obs.lib -ErrorAction SilentlyContinue | Select-Object -First 1
           }
 
           if (-not $obsLib) {
