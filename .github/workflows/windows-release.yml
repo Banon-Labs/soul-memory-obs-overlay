@@ -32,15 +32,31 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Install cargo-obs-build
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-obs-build
+      - name: Install OBS Studio build dependency
+        shell: pwsh
+        run: |
+          choco install obs-studio -y
 
-      - name: Build OBS development dependencies
-        run: cargo obs-build build --out-dir target/x86_64-pc-windows-msvc/release/deps
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          $searchRoots = @(
+            "$env:ChocolateyInstall/lib",
+            "C:/Program Files/obs-studio",
+            "C:/Program Files (x86)/obs-studio"
+          )
+
+          $obsLib = $null
+          foreach ($root in $searchRoots) {
+            if (Test-Path $root) {
+              $obsLib = Get-ChildItem $root -Recurse -Filter obs.lib -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($obsLib) { break }
+            }
+          }
+
+          if (-not $obsLib) {
+            throw "obs.lib not found after OBS installation"
+          }
+
+          Write-Host "Found obs.lib at: $($obsLib.FullName)"
+          "LIB=$($obsLib.DirectoryName);$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run tests
         if: github.event_name != 'workflow_dispatch'
