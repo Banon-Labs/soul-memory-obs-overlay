@@ -1,0 +1,104 @@
+name: windows-release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name to release (example: v0.1.0)"
+        required: true
+        type: string
+      draft:
+        description: "Create as draft release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: [self-hosted, windows, banonlabs]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build plugin and helper
+        run: |
+          cargo build -p overlay-plugin --target x86_64-pc-windows-msvc --release
+          cargo build -p overlay-helper --target x86_64-pc-windows-msvc --release
+
+      - name: Package installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            throw "makensis (NSIS) is not available on this runner. Install NSIS on the BanonLabs runner image."
+          }
+          makensis installer/overlay-installer.nsi
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/overlay_plugin.dll" "release-assets/overlay_plugin.dll" -Force
+          Copy-Item "target/x86_64-pc-windows-msvc/release/overlay-helper.exe" "release-assets/overlay-helper.exe" -Force
+          Copy-Item "crates/overlay-plugin/data/config/overlay.toml" "release-assets/overlay.toml" -Force
+          Copy-Item "crates/overlay-plugin/data/locale/en-US.ini" "release-assets/en-US.ini" -Force
+          Copy-Item "QUICKSTART.md" "release-assets/QUICKSTART.md" -Force
+          Copy-Item "INSTALL_FIRST.txt" "release-assets/INSTALL_FIRST.txt" -Force
+          Copy-Item "SoulMemoryOverlay-0.1.0-setup.exe" "release-assets/SoulMemoryOverlay-setup.exe" -Force
+          Compress-Archive -Path "release-assets/*" -DestinationPath "release-assets/SoulMemoryOverlay-windows-x64.zip" -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soul-memory-overlay-windows
+          path: |
+            release-assets/overlay_plugin.dll
+            release-assets/overlay-helper.exe
+            release-assets/overlay.toml
+            release-assets/en-US.ini
+            release-assets/QUICKSTART.md
+            release-assets/INSTALL_FIRST.txt
+            release-assets/SoulMemoryOverlay-setup.exe
+            release-assets/SoulMemoryOverlay-windows-x64.zip
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build-windows
+    runs-on: [self-hosted, windows, banonlabs]
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: soul-memory-overlay-windows
+          path: dist
+
+      - name: Create GitHub release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/overlay_plugin.dll
+            dist/overlay-helper.exe
+            dist/overlay.toml
+            dist/en-US.ini
+            dist/QUICKSTART.md
+            dist/INSTALL_FIRST.txt
+            dist/SoulMemoryOverlay-setup.exe
+            dist/SoulMemoryOverlay-windows-x64.zip
