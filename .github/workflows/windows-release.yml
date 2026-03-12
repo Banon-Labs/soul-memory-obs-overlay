@@ -176,7 +176,7 @@ jobs:
             Copy-Item $helperCandidate.FullName $expectedHelper -Force
           }
 
-          $stagingDir = Join-Path $env:GITHUB_WORKSPACE "staging"
+          $stagingDir = Join-Path $env:GITHUB_WORKSPACE "installer/staging"
           New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
           Copy-Item $expectedPlugin (Join-Path $stagingDir "overlay_plugin.dll") -Force
