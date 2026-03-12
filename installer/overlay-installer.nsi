@@ -1,5 +1,9 @@
 !include "MUI2.nsh"
 
+!ifndef PROJECT_ROOT
+!define PROJECT_ROOT "."
+!endif
+
 !define APP_NAME "Soul Memory OBS Overlay"
 !define COMPANY_NAME "soul-memory-obs-overlay"
 !define DLL_NAME "overlay_plugin.dll"
@@ -20,14 +24,14 @@ RequestExecutionLevel admin
 
 Section "Install"
   SetOutPath "$INSTDIR\obs-plugins\64bit"
-  File "staging/overlay_plugin.dll"
-  File "staging/overlay-helper.exe"
+  File "${PROJECT_ROOT}\installer\staging\overlay_plugin.dll"
+  File "${PROJECT_ROOT}\installer\staging\overlay-helper.exe"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"
-  File "staging/overlay.toml"
+  File "${PROJECT_ROOT}\installer\staging\overlay.toml"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\locale"
-  File "staging/en-US.ini"
+  File "${PROJECT_ROOT}\installer\staging\en-US.ini"
 
   SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\obs-overlay-uninstall.exe"
