@@ -18,6 +18,7 @@
 
 Var ObsPathDetected
 Var DetectedObsDir
+Var ProgramDataDir
 Var InstallMode
 Var PortableDetectNoticeShown
 Var ModePageDialog
@@ -26,7 +27,7 @@ Var ModePortableRadio
 
 Name "${APP_NAME} ${PRODUCT_VERSION}"
 OutFile "SoulMemoryOverlay-${PRODUCT_VERSION}-setup.exe"
-InstallDir "$COMMONAPPDATA\obs-studio\plugins\soul-memory-obs-overlay"
+InstallDir "$PROGRAMFILES64\obs-studio"
 RequestExecutionLevel admin
 
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Choose installation folder."
@@ -35,7 +36,6 @@ RequestExecutionLevel admin
 Page custom InstallModePageCreate InstallModePageLeave
 !define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPagePre
 !insertmacro MUI_PAGE_DIRECTORY
-!undef MUI_PAGE_CUSTOMFUNCTION_PRE
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -46,6 +46,9 @@ Function .onInit
   StrCpy $InstallMode "${INSTALL_MODE_STANDARD}"
   StrCpy $ObsPathDetected "0"
   StrCpy $DetectedObsDir ""
+  ExpandEnvStrings $ProgramDataDir "%ProgramData%"
+  StrCmp $ProgramDataDir "" 0 +2
+    StrCpy $ProgramDataDir "C:\ProgramData"
   StrCpy $PortableDetectNoticeShown "0"
   Call DetectObsInstallDir
 FunctionEnd
@@ -89,7 +92,7 @@ Function DirectoryPagePre
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_mode standard_mode
 
 standard_mode:
-  StrCpy $INSTDIR "$COMMONAPPDATA\obs-studio\plugins\soul-memory-obs-overlay"
+  StrCpy $INSTDIR "$ProgramDataDir\obs-studio\plugins\soul-memory-obs-overlay"
   Return
 
 portable_mode:
@@ -263,15 +266,97 @@ install_portable:
 install_done:
 SectionEnd
 
+Function un.DetectObsInstallDir
+  StrCpy $ObsPathDetected "0"
+  StrCpy $DetectedObsDir ""
+
+  SetRegView 64
+  ReadRegStr $0 HKLM "${OBS_UNINSTALL_KEY}" "InstallLocation"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKLM "${OBS_UNINSTALL_KEY}" "Inno Setup: App Path"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKCU "${OBS_UNINSTALL_KEY}" "InstallLocation"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKCU "${OBS_UNINSTALL_KEY}" "Inno Setup: App Path"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+
+  SetRegView 32
+  ReadRegStr $0 HKLM "${OBS_UNINSTALL_KEY}" "InstallLocation"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKLM "${OBS_UNINSTALL_KEY}" "Inno Setup: App Path"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKCU "${OBS_UNINSTALL_KEY}" "InstallLocation"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+  ReadRegStr $0 HKCU "${OBS_UNINSTALL_KEY}" "Inno Setup: App Path"
+  StrCmp $0 "" +2 0
+    Goto un.FoundInstallDir
+
+  IfFileExists "D:\Obs\bin\64bit\obs64.exe" 0 +3
+    StrCpy $DetectedObsDir "D:\Obs"
+    StrCpy $ObsPathDetected "1"
+    Return
+  IfFileExists "D:\obs-studio\bin\64bit\obs64.exe" 0 +3
+    StrCpy $DetectedObsDir "D:\obs-studio"
+    StrCpy $ObsPathDetected "1"
+    Return
+  IfFileExists "$PROGRAMFILES64\obs-studio\bin\64bit\obs64.exe" 0 +3
+    StrCpy $DetectedObsDir "$PROGRAMFILES64\obs-studio"
+    StrCpy $ObsPathDetected "1"
+    Return
+  IfFileExists "$PROGRAMFILES\obs-studio\bin\64bit\obs64.exe" 0 +3
+    StrCpy $DetectedObsDir "$PROGRAMFILES\obs-studio"
+    StrCpy $ObsPathDetected "1"
+    Return
+  Return
+
+un.FoundInstallDir:
+  IfFileExists "$0\bin\64bit\obs64.exe" 0 +4
+    StrCpy $DetectedObsDir "$0"
+    StrCpy $ObsPathDetected "1"
+    Return
+  IfFileExists "$0\obs64.exe" 0 +7
+    ${GetParent} "$0" $1
+    ${GetParent} "$1" $2
+    IfFileExists "$2\bin\64bit\obs64.exe" 0 +3
+      StrCpy $DetectedObsDir "$2"
+      StrCpy $ObsPathDetected "1"
+    Return
+  Return
+FunctionEnd
+
+Function un.CleanupLegacyObsRootInstall
+  StrCmp $ObsPathDetected "1" 0 un.cleanup_done
+  StrCmp $DetectedObsDir "" un.cleanup_done 0
+  StrCmp $DetectedObsDir $INSTDIR un.cleanup_done 0
+
+  Delete "$DetectedObsDir\obs-plugins\64bit\overlay_plugin.dll"
+  Delete "$DetectedObsDir\obs-plugins\64bit\overlay-helper.exe"
+  Delete "$DetectedObsDir\data\obs-plugins\soul-memory-obs-overlay\config\overlay.toml"
+  Delete "$DetectedObsDir\data\obs-plugins\soul-memory-obs-overlay\locale\en-US.ini"
+  RMDir "$DetectedObsDir\data\obs-plugins\soul-memory-obs-overlay\config"
+  RMDir "$DetectedObsDir\data\obs-plugins\soul-memory-obs-overlay\locale"
+  RMDir "$DetectedObsDir\data\obs-plugins\soul-memory-obs-overlay"
+  Delete "$DetectedObsDir\obs-overlay-uninstall.exe"
+
+un.cleanup_done:
+FunctionEnd
+
 Section "Uninstall"
   IfFileExists "$INSTDIR\bin\64bit\overlay_plugin.dll" uninstall_standard uninstall_portable_check
 
 uninstall_standard:
   StrCpy $R9 $INSTDIR
 
-  Call DetectObsInstallDir
+  Call un.DetectObsInstallDir
   StrCpy $INSTDIR $R9
-  Call CleanupLegacyObsRootInstall
+  Call un.CleanupLegacyObsRootInstall
 
   Delete "$INSTDIR\bin\64bit\overlay_plugin.dll"
   Delete "$INSTDIR\bin\64bit\overlay-helper.exe"
