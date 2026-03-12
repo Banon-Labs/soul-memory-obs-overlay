@@ -37,31 +37,48 @@ jobs:
         run: |
           choco install obs-studio -y
 
-          $searchRoots = @(
-            "$env:ChocolateyInstall/lib",
-            "C:/ProgramData",
-            "C:/Program Files/obs-studio",
-            "C:/Program Files (x86)/obs-studio"
-          )
+          $obsDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          $frontendDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs-frontend-api.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $obsDll -or -not $frontendDll) {
+            throw "Could not find OBS runtime DLLs after installation"
+          }
 
-          $obsLib = $null
-          foreach ($root in $searchRoots) {
-            if (Test-Path $root) {
-              $obsLib = Get-ChildItem $root -Recurse -Filter obs.lib -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($obsLib) { break }
+          function New-ImportLib {
+            param(
+              [string]$DllPath,
+              [string]$LibName,
+              [string]$OutDir
+            )
+            $defPath = Join-Path $OutDir "$LibName.def"
+            $libPath = Join-Path $OutDir "$LibName.lib"
+
+            $dump = & dumpbin /exports $DllPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $DllPath"
+            }
+
+            "LIBRARY $LibName" | Out-File -FilePath $defPath -Encoding ascii
+            "EXPORTS" | Out-File -FilePath $defPath -Append -Encoding ascii
+            foreach ($line in $dump) {
+              if ($line -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)$') {
+                $Matches[1] | Out-File -FilePath $defPath -Append -Encoding ascii
+              }
+            }
+
+            & lib /def:$defPath /out:$libPath /machine:x64
+            if ($LASTEXITCODE -ne 0) {
+              throw "lib.exe failed generating $libPath"
             }
           }
 
-          if (-not $obsLib) {
-            $obsLib = Get-ChildItem "C:/" -Recurse -Filter obs.lib -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
+          $importDir = Join-Path $env:RUNNER_TEMP "obs-import-libs"
+          New-Item -ItemType Directory -Path $importDir -Force | Out-Null
 
-          if (-not $obsLib) {
-            throw "obs.lib not found after OBS installation"
-          }
+          New-ImportLib -DllPath $obsDll.FullName -LibName "obs" -OutDir $importDir
+          New-ImportLib -DllPath $frontendDll.FullName -LibName "obs-frontend-api" -OutDir $importDir
 
-          Write-Host "Found obs.lib at: $($obsLib.FullName)"
-          "LIB=$($obsLib.DirectoryName);$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Generated import libs in: $importDir"
+          "LIB=$importDir;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run tests
         if: github.event_name != 'workflow_dispatch'
