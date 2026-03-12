@@ -147,7 +147,12 @@ jobs:
             throw "makensis (NSIS) is not available on this runner after NSIS installation"
           }
 
-          & $makensisExe installer/overlay-installer.nsi
+          $installerScript = Join-Path $env:GITHUB_WORKSPACE "installer/overlay-installer.nsi"
+          if (-not (Test-Path $installerScript)) {
+            throw "Installer script not found at $installerScript"
+          }
+
+          & $makensisExe $installerScript
 
       - name: Prepare release assets
         shell: pwsh
