@@ -176,6 +176,14 @@ jobs:
             Copy-Item $helperCandidate.FullName $expectedHelper -Force
           }
 
+          $stagingDir = Join-Path $env:GITHUB_WORKSPACE "staging"
+          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+          Copy-Item $expectedPlugin (Join-Path $stagingDir "overlay_plugin.dll") -Force
+          Copy-Item $expectedHelper (Join-Path $stagingDir "overlay-helper.exe") -Force
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "crates/overlay-plugin/data/config/overlay.toml") (Join-Path $stagingDir "overlay.toml") -Force
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "crates/overlay-plugin/data/locale/en-US.ini") (Join-Path $stagingDir "en-US.ini") -Force
+
           Push-Location $env:GITHUB_WORKSPACE
           try {
             if (-not (Test-Path $expectedPlugin)) {
@@ -183,6 +191,18 @@ jobs:
             }
             if (-not (Test-Path $expectedHelper)) {
               throw "Expected helper EXE still missing at $expectedHelper"
+            }
+            if (-not (Test-Path (Join-Path $stagingDir "overlay_plugin.dll"))) {
+              throw "Staged plugin DLL missing in $stagingDir"
+            }
+            if (-not (Test-Path (Join-Path $stagingDir "overlay-helper.exe"))) {
+              throw "Staged helper EXE missing in $stagingDir"
+            }
+            if (-not (Test-Path (Join-Path $stagingDir "overlay.toml"))) {
+              throw "Staged overlay.toml missing in $stagingDir"
+            }
+            if (-not (Test-Path (Join-Path $stagingDir "en-US.ini"))) {
+              throw "Staged en-US.ini missing in $stagingDir"
             }
 
             $projectRootForNsis = $env:GITHUB_WORKSPACE
