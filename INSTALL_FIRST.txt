@@ -4,11 +4,13 @@ If you are not technical, do this exactly:
 
 1) Close OBS Studio.
 2) Run SoulMemoryOverlay-<version>-setup.exe normally (NOT as Administrator).
+   - Choose Standard (recommended) for normal OBS installs (ProgramData plugin layout).
+   - Choose Portable/custom OBS only if needed, then select the OBS folder containing bin\64bit\obs64.exe.
 3) Open OBS Studio.
 4) In Sources, click + and choose "Soul Memory Overlay".
 5) Start Dark Souls II and load your character.
 
-If Windows asks for admin permissions, cancel and use the no-admin manual files in this package.
+If Windows asks for admin permissions, allow the installer to continue.
 
 If the source says "Disconnected":
 - Make sure the game process is DarkSoulsII.exe

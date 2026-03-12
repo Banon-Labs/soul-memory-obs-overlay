@@ -19,11 +19,14 @@ When Dark Souls II: Scholar of the First Sin is running, the source shows your S
 1. Download `SoulMemoryOverlay-<version>-setup.exe`
 2. Run it normally (do **not** run as Administrator)
 3. Finish the installer
+   - Choose **Standard (recommended)** to install to `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay`.
+   - Choose **Portable/custom OBS** only when needed, then select the OBS folder that contains `bin\64bit\obs64.exe`.
+   - In Portable/custom mode, the installer will not continue until a valid OBS folder is selected.
 4. Open OBS Studio
 5. In **Sources**, click **+**
 6. Choose **Soul Memory Overlay**
 
-If Windows asks for admin permissions, cancel and use the no-admin/manual route in this release package.
+If Windows asks for admin permissions, allow the installer to continue.
 
 ## Make It Show Data
 
@@ -49,7 +52,7 @@ Run the newest installer over your current install. No manual uninstall required
 Use either:
 
 - Windows Settings -> Apps -> Installed Apps -> Soul Memory OBS Overlay -> Uninstall
-- `obs-overlay-uninstall.exe` in your OBS folder
+- `obs-overlay-uninstall.exe` in your mode-specific install folder (ProgramData plugin folder for Standard mode, OBS folder for Portable/custom mode)
 
 ## OBS Basics (Quick)
 
