@@ -178,7 +178,15 @@ jobs:
 
           Push-Location $env:GITHUB_WORKSPACE
           try {
-            & $makensisExe "installer/overlay-installer.nsi"
+            if (-not (Test-Path $expectedPlugin)) {
+              throw "Expected plugin DLL still missing at $expectedPlugin"
+            }
+            if (-not (Test-Path $expectedHelper)) {
+              throw "Expected helper EXE still missing at $expectedHelper"
+            }
+
+            $projectRootForNsis = $env:GITHUB_WORKSPACE -replace '\\', '/'
+            & $makensisExe "/DPROJECT_ROOT=$projectRootForNsis" "installer/overlay-installer.nsi"
           }
           finally {
             Pop-Location
