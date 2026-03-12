@@ -11,7 +11,7 @@
 !define COMPANY_NAME "soul-memory-obs-overlay"
 !define DLL_NAME "overlay_plugin.dll"
 !define HELPER_EXE "overlay-helper.exe"
-!define PRODUCT_VERSION "0.1.1"
+!define PRODUCT_VERSION "0.1.2"
 !define OBS_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OBS Studio_is1"
 !define INSTALL_MODE_STANDARD "standard"
 !define INSTALL_MODE_PORTABLE "portable"
@@ -90,7 +90,6 @@ Function DirectoryPagePre
 
 standard_mode:
   StrCpy $INSTDIR "$COMMONAPPDATA\obs-studio\plugins\soul-memory-obs-overlay"
-  DirText "Choose plugin installation folder." "Standard mode installs to ProgramData plugin layout for non-portable OBS." "Browse..."
   Return
 
 portable_mode:
@@ -108,7 +107,6 @@ detected:
   StrCpy $PortableDetectNoticeShown "1"
 
 portable_text:
-  DirText "Choose OBS installation folder." "Portable/custom mode installs to OBS root layout. Select the folder containing bin\\64bit\\obs64.exe." "Browse..."
 FunctionEnd
 
 Function DetectObsInstallDir
