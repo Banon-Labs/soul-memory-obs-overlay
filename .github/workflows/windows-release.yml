@@ -106,11 +106,14 @@ jobs:
         shell: pwsh
         run: |
           function Resolve-Makensis {
+            $programFilesX86 = ${env:ProgramFiles(x86)}
+            $programFiles = $env:ProgramFiles
+
             $candidates = @(
-              "$env:ProgramFiles(x86)/NSIS/Bin/makensis.exe",
-              "$env:ProgramFiles(x86)/NSIS/makensis.exe",
-              "$env:ProgramFiles/NSIS/Bin/makensis.exe",
-              "$env:ProgramFiles/NSIS/makensis.exe",
+              (Join-Path $programFilesX86 "NSIS/Bin/makensis.exe"),
+              (Join-Path $programFilesX86 "NSIS/makensis.exe"),
+              (Join-Path $programFiles "NSIS/Bin/makensis.exe"),
+              (Join-Path $programFiles "NSIS/makensis.exe"),
               "$env:ChocolateyInstall/bin/makensis.exe"
             )
 
@@ -125,7 +128,8 @@ jobs:
               return $command.Source
             }
 
-            $recursive = Get-ChildItem "$env:ProgramFiles(x86)/NSIS" -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            $recursiveRoot = Join-Path $programFilesX86 "NSIS"
+            $recursive = Get-ChildItem $recursiveRoot -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($recursive) {
               return $recursive.FullName
             }
