@@ -59,6 +59,25 @@ Migration behavior:
 - **Installer cannot find OBS automatically in Portable/custom mode**
   - Click **Browse** and select the folder that contains `bin\64bit\obs64.exe`.
 
+## CI Code Signing Setup (Maintainers)
+
+To configure GitHub Actions signing secrets/variables without putting passwords into files:
+
+- WSL wrapper for PowerShell setup script (recommended for WSL users):
+  - `bash scripts/setup-codesign-secrets-wsl.sh -CreateTestCert -Repo "chozandrias76/soul-memory-obs-overlay"`
+- Bash (Linux/WSL, existing `.pfx`):
+  - `bash scripts/setup-codesign-secrets.sh --pfx "/path/to/codesign.pfx"`
+- PowerShell 7 (Windows, existing `.pfx`):
+  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -PfxPath "C:\path\to\codesign.pfx"`
+- PowerShell 7 (Windows, generate temporary self-signed test cert and configure secrets):
+  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -CreateTestCert`
+
+Check whether required names exist:
+
+- `bash scripts/setup-codesign-secrets-wsl.sh -Check -Repo "chozandrias76/soul-memory-obs-overlay"`
+- `bash scripts/setup-codesign-secrets.sh --check`
+- `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -Check`
+
 ## License
 
 GPL-2.0-only (`LICENSE`). OBS plugin distribution remains GPL-compatible.
