@@ -152,6 +152,30 @@ jobs:
             throw "Installer script not found at $installerScript"
           }
 
+          $expectedOutDir = Join-Path $env:GITHUB_WORKSPACE "target/x86_64-pc-windows-msvc/release"
+          New-Item -ItemType Directory -Path $expectedOutDir -Force | Out-Null
+
+          $expectedPlugin = Join-Path $expectedOutDir "overlay_plugin.dll"
+          if (-not (Test-Path $expectedPlugin)) {
+            $pluginCandidate = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE "target") -Recurse -File -Filter "*.dll" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -eq "overlay_plugin.dll" -or $_.Name -eq "overlay-plugin.dll" } |
+              Select-Object -First 1
+            if (-not $pluginCandidate) {
+              $nearbyDlls = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE "target") -Recurse -File -Filter "*overlay*.dll" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+              throw "overlay plugin DLL not found in target tree. Nearby candidates: $($nearbyDlls -join '; ')"
+            }
+            Copy-Item $pluginCandidate.FullName $expectedPlugin -Force
+          }
+
+          $expectedHelper = Join-Path $expectedOutDir "overlay-helper.exe"
+          if (-not (Test-Path $expectedHelper)) {
+            $helperCandidate = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE "target") -Recurse -File -Filter "overlay-helper.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $helperCandidate) {
+              throw "overlay-helper.exe not found in target tree"
+            }
+            Copy-Item $helperCandidate.FullName $expectedHelper -Force
+          }
+
           Push-Location $env:GITHUB_WORKSPACE
           try {
             & $makensisExe "installer/overlay-installer.nsi"
