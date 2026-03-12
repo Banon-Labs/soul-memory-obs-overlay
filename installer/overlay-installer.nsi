@@ -11,7 +11,7 @@
 !define COMPANY_NAME "soul-memory-obs-overlay"
 !define DLL_NAME "overlay_plugin.dll"
 !define HELPER_EXE "overlay-helper.exe"
-!define PRODUCT_VERSION "0.1.2"
+!define PRODUCT_VERSION "0.1.3"
 !define OBS_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OBS Studio_is1"
 !define INSTALL_MODE_STANDARD "standard"
 !define INSTALL_MODE_PORTABLE "portable"
