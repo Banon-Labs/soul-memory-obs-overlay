@@ -52,6 +52,19 @@ Step "Validate update status surface" {
   Write-Host "Open source properties and verify status/update text is present."
 }
 
+Step "Review CI signing and AV scan evidence" {
+  Write-Host "From the latest windows-release workflow artifacts, download and inspect:"
+  Write-Host "- signing-report.json (expect status=Valid for overlay_plugin.dll, overlay-helper.exe, SoulMemoryOverlay-setup.exe)"
+  Write-Host "- defender-scan-report.json (expect scan_status=clean and detected=false for scanned assets)"
+  Write-Host "- SHA256SUMS.txt (archive and asset hashes published for reproducibility and vendor submissions)"
+}
+
+Step "False-positive escalation tracking" {
+  Write-Host "If defender-scan-report.json shows detections, submit flagged files at https://www.microsoft.com/en-us/wdsi/filesubmission as Software developer."
+  Write-Host "Record Microsoft submission IDs and any vendor ticket IDs in AV_FALSE_POSITIVE_LOG.md."
+  Write-Host "Link the log entry from the active beads issue before release completion."
+}
+
 Step "Uninstall and cleanup" {
   Write-Host "Run obs-overlay-uninstall.exe from Standard mode install folder and confirm ProgramData plugin files are removed."
   Write-Host "After Standard-mode uninstall, confirm legacy OBS-root files for this plugin are also absent."

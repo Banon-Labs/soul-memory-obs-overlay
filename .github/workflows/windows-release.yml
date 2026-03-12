@@ -229,7 +229,263 @@ jobs:
             throw "Installer EXE not found after NSIS packaging"
           }
           Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
-          Compress-Archive -Path "release-assets/*" -DestinationPath "release-assets/SoulMemoryOverlay-windows-x64.zip" -Force
+
+      - name: Sign and verify Windows binaries
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: |
+          function Resolve-SignTool {
+            $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($command) {
+              return $command.Source
+            }
+
+            $roots = @(
+              (Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/bin"),
+              (Join-Path $env:ProgramFiles "Windows Kits/10/bin")
+            )
+
+            foreach ($root in $roots) {
+              if (-not $root -or -not (Test-Path $root)) {
+                continue
+              }
+              $candidate = Get-ChildItem $root -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending |
+                Select-Object -First 1
+              if ($candidate) {
+                return $candidate.FullName
+              }
+            }
+
+            return $null
+          }
+
+          $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
+          $filesToSign = @(
+            "release-assets/overlay_plugin.dll",
+            "release-assets/overlay-helper.exe",
+            "release-assets/SoulMemoryOverlay-setup.exe"
+          )
+
+          $report = @()
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
+
+          if (-not ($hasPfx -and $hasPassword)) {
+            $reason = "Signing secrets are not configured. Set WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD."
+            foreach ($file in $filesToSign) {
+              $report += [pscustomobject]@{
+                file = $file
+                status = "NotSigned"
+                signed = $false
+                signer = $null
+                timestamp = $null
+                reason = "missing-signing-secrets"
+              }
+            }
+
+            $report | ConvertTo-Json -Depth 4 | Out-File -FilePath "release-assets/signing-report.json" -Encoding utf8
+
+            if ($releaseContext) {
+              throw $reason
+            }
+
+            Write-Warning $reason
+            return
+          }
+
+          $signTool = Resolve-SignTool
+          if (-not $signTool) {
+            throw "signtool.exe not found on runner"
+          }
+
+          $timestampUrl = $env:WINDOWS_CODESIGN_TIMESTAMP_URL
+          if ([string]::IsNullOrWhiteSpace($timestampUrl)) {
+            $timestampUrl = "http://timestamp.digicert.com"
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "windows-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+
+          try {
+            foreach ($file in $filesToSign) {
+              if (-not (Test-Path $file)) {
+                throw "File to sign not found: $file"
+              }
+
+              & $signTool sign /fd SHA256 /tr $timestampUrl /td SHA256 /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $file
+              if ($LASTEXITCODE -ne 0) {
+                throw "signtool sign failed for $file (exit code $LASTEXITCODE)"
+              }
+
+              $signature = Get-AuthenticodeSignature -FilePath $file
+              if ($signature.Status -ne "Valid") {
+                throw "Signature verification failed for $file: $($signature.Status) $($signature.StatusMessage)"
+              }
+
+              $report += [pscustomobject]@{
+                file = $file
+                status = [string]$signature.Status
+                signed = $true
+                signer = $signature.SignerCertificate.Subject
+                timestamp = if ($signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { $null }
+                reason = $null
+              }
+            }
+          }
+          finally {
+            if (Test-Path $pfxPath) {
+              Remove-Item $pfxPath -Force
+            }
+          }
+
+          $report | ConvertTo-Json -Depth 4 | Out-File -FilePath "release-assets/signing-report.json" -Encoding utf8
+
+      - name: Build archive and SHA256 manifest
+        shell: pwsh
+        run: |
+          $deliverables = @(
+            "release-assets/overlay_plugin.dll",
+            "release-assets/overlay-helper.exe",
+            "release-assets/overlay.toml",
+            "release-assets/en-US.ini",
+            "release-assets/QUICKSTART.md",
+            "release-assets/INSTALL_FIRST.txt",
+            "release-assets/SoulMemoryOverlay-setup.exe"
+          )
+
+          Compress-Archive -Path $deliverables -DestinationPath "release-assets/SoulMemoryOverlay-windows-x64.zip" -Force
+          $deliverables += "release-assets/SoulMemoryOverlay-windows-x64.zip"
+
+          $hashLines = @()
+          foreach ($file in $deliverables) {
+            if (-not (Test-Path $file)) {
+              throw "Expected deliverable missing while computing hashes: $file"
+            }
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $file).Hash.ToLowerInvariant()
+            $hashLines += "$hash *$([IO.Path]::GetFileName($file))"
+          }
+
+          $hashLines | Set-Content -Path "release-assets/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Scan release assets with Microsoft Defender
+        shell: pwsh
+        run: |
+          function Resolve-MpCmdRun {
+            $candidatePaths = @(
+              (Join-Path $env:ProgramFiles "Windows Defender/MpCmdRun.exe"),
+              (Join-Path $env:ProgramFiles "Microsoft Defender/MpCmdRun.exe")
+            )
+
+            foreach ($candidate in $candidatePaths) {
+              if ($candidate -and (Test-Path $candidate)) {
+                return $candidate
+              }
+            }
+
+            $platformRoot = "C:/ProgramData/Microsoft/Windows Defender/Platform"
+            if (Test-Path $platformRoot) {
+              $platformExe = Get-ChildItem $platformRoot -Recurse -Filter MpCmdRun.exe -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending |
+                Select-Object -First 1
+              if ($platformExe) {
+                return $platformExe.FullName
+              }
+            }
+
+            return $null
+          }
+
+          $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
+          $scanTargets = @(
+            "release-assets/overlay_plugin.dll",
+            "release-assets/overlay-helper.exe",
+            "release-assets/SoulMemoryOverlay-setup.exe",
+            "release-assets/SoulMemoryOverlay-windows-x64.zip"
+          )
+
+          $mpCmdRun = Resolve-MpCmdRun
+          $hasThreatCmd = $null -ne (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue)
+          $report = @()
+
+          if (-not $mpCmdRun -or -not $hasThreatCmd) {
+            $reason = if (-not $mpCmdRun) {
+              "MpCmdRun.exe is unavailable on runner"
+            } else {
+              "Get-MpThreatDetection is unavailable on runner"
+            }
+
+            $report += [pscustomobject]@{
+              asset = "(all)"
+              detected = $null
+              threat_name = $null
+              severity = $null
+              scan_exit_code = $null
+              scan_status = "unavailable"
+              detail = $reason
+            }
+            $report | ConvertTo-Json -Depth 5 | Out-File -FilePath "release-assets/defender-scan-report.json" -Encoding utf8
+
+            if ($releaseContext) {
+              throw $reason
+            }
+
+            Write-Warning $reason
+            return
+          }
+
+          $hasDetection = $false
+          $hasScanError = $false
+
+          foreach ($target in $scanTargets) {
+            if (-not (Test-Path $target)) {
+              throw "Defender scan target missing: $target"
+            }
+
+            $resolvedTarget = (Resolve-Path $target).Path
+            $scanOutput = & $mpCmdRun -Scan -ScanType 3 -File $resolvedTarget 2>&1
+            $scanExit = $LASTEXITCODE
+            Start-Sleep -Seconds 2
+
+            $threat = Get-MpThreatDetection -ErrorAction SilentlyContinue |
+              Where-Object {
+                $resources = @($_.Resources | ForEach-Object { $_.ToString() })
+                ($resources -join ";") -match [regex]::Escape($resolvedTarget)
+              } |
+              Sort-Object InitialDetectionTime -Descending |
+              Select-Object -First 1
+
+            $detected = $null -ne $threat
+            if ($detected) {
+              $hasDetection = $true
+            }
+            if ($scanExit -ne 0 -and -not $detected) {
+              $hasScanError = $true
+            }
+
+            $report += [pscustomobject]@{
+              asset = $target
+              detected = $detected
+              threat_name = if ($threat) { $threat.ThreatName } else { $null }
+              severity = if ($threat) { $threat.SeverityID } else { $null }
+              scan_exit_code = $scanExit
+              scan_status = if ($detected) { "detected" } elseif ($scanExit -eq 0) { "clean" } else { "scan-error" }
+              detail = ($scanOutput | Out-String).Trim()
+            }
+          }
+
+          $report | ConvertTo-Json -Depth 5 | Out-File -FilePath "release-assets/defender-scan-report.json" -Encoding utf8
+
+          if ($hasDetection) {
+            throw "Microsoft Defender detected one or more release assets. See release-assets/defender-scan-report.json"
+          }
+
+          if ($hasScanError -and $releaseContext) {
+            throw "One or more Defender scans failed in release context. See release-assets/defender-scan-report.json"
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -244,6 +500,9 @@ jobs:
             release-assets/INSTALL_FIRST.txt
             release-assets/SoulMemoryOverlay-setup.exe
             release-assets/SoulMemoryOverlay-windows-x64.zip
+            release-assets/SHA256SUMS.txt
+            release-assets/signing-report.json
+            release-assets/defender-scan-report.json
 
   publish-release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -272,3 +531,6 @@ jobs:
             dist/INSTALL_FIRST.txt
             dist/SoulMemoryOverlay-setup.exe
             dist/SoulMemoryOverlay-windows-x64.zip
+            dist/SHA256SUMS.txt
+            dist/signing-report.json
+            dist/defender-scan-report.json
