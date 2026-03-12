@@ -105,13 +105,38 @@ jobs:
       - name: Package installer
         shell: pwsh
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+          function Resolve-Makensis {
+            $candidates = @(
+              "$env:ProgramFiles(x86)/NSIS/makensis.exe",
+              "$env:ProgramFiles/NSIS/makensis.exe",
+              "$env:ChocolateyInstall/bin/makensis.exe"
+            )
+
+            foreach ($candidate in $candidates) {
+              if ($candidate -and (Test-Path $candidate)) {
+                return (Resolve-Path $candidate).Path
+              }
+            }
+
+            $command = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($command) {
+              return $command.Source
+            }
+
+            return $null
+          }
+
+          $makensisExe = Resolve-Makensis
+          if (-not $makensisExe) {
             choco install nsis -y
+            $makensisExe = Resolve-Makensis
           }
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            throw "makensis (NSIS) is not available on this runner"
+
+          if (-not $makensisExe) {
+            throw "makensis (NSIS) is not available on this runner after NSIS installation"
           }
-          makensis installer/overlay-installer.nsi
+
+          & $makensisExe installer/overlay-installer.nsi
 
       - name: Prepare release assets
         shell: pwsh
