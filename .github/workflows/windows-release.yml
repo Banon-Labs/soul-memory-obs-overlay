@@ -185,7 +185,7 @@ jobs:
               throw "Expected helper EXE still missing at $expectedHelper"
             }
 
-            $projectRootForNsis = $env:GITHUB_WORKSPACE -replace '\\', '/'
+            $projectRootForNsis = $env:GITHUB_WORKSPACE
             & $makensisExe "/DPROJECT_ROOT=$projectRootForNsis" "installer/overlay-installer.nsi"
           }
           finally {
