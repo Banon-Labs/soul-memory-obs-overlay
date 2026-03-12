@@ -47,12 +47,14 @@ jobs:
             param(
               [string]$DllPath,
               [string]$LibName,
-              [string]$OutDir
+              [string]$OutDir,
+              [string]$DumpbinExe,
+              [string]$LibExe
             )
             $defPath = Join-Path $OutDir "$LibName.def"
             $libPath = Join-Path $OutDir "$LibName.lib"
 
-            $dump = & dumpbin /exports $DllPath
+            $dump = & $DumpbinExe /exports $DllPath
             if ($LASTEXITCODE -ne 0) {
               throw "dumpbin failed for $DllPath"
             }
@@ -65,17 +67,28 @@ jobs:
               }
             }
 
-            & lib /def:$defPath /out:$libPath /machine:x64
+            & $LibExe /def:$defPath /out:$libPath /machine:x64
             if ($LASTEXITCODE -ne 0) {
               throw "lib.exe failed generating $libPath"
             }
           }
 
+          $toolDir = Get-ChildItem "C:/Program Files/Microsoft Visual Studio/2022" -Recurse -Directory -Filter Hostx64 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $toolDir) {
+            throw "Visual Studio tool directory not found"
+          }
+          $binDir = Join-Path $toolDir.FullName "x64"
+          $dumpbinExe = Join-Path $binDir "dumpbin.exe"
+          $libExe = Join-Path $binDir "lib.exe"
+          if (-not (Test-Path $dumpbinExe) -or -not (Test-Path $libExe)) {
+            throw "dumpbin.exe or lib.exe not found in Visual Studio toolchain"
+          }
+
           $importDir = Join-Path $env:RUNNER_TEMP "obs-import-libs"
           New-Item -ItemType Directory -Path $importDir -Force | Out-Null
 
-          New-ImportLib -DllPath $obsDll.FullName -LibName "obs" -OutDir $importDir
-          New-ImportLib -DllPath $frontendDll.FullName -LibName "obs-frontend-api" -OutDir $importDir
+          New-ImportLib -DllPath $obsDll.FullName -LibName "obs" -OutDir $importDir -DumpbinExe $dumpbinExe -LibExe $libExe
+          New-ImportLib -DllPath $frontendDll.FullName -LibName "obs-frontend-api" -OutDir $importDir -DumpbinExe $dumpbinExe -LibExe $libExe
 
           Write-Host "Generated import libs in: $importDir"
           "LIB=$importDir;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
