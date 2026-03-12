@@ -323,7 +323,7 @@ jobs:
 
               $signature = Get-AuthenticodeSignature -FilePath $file
               if ($signature.Status -ne "Valid") {
-                throw "Signature verification failed for $file: $($signature.Status) $($signature.StatusMessage)"
+                throw "Signature verification failed for ${file}: $($signature.Status) $($signature.StatusMessage)"
               }
 
               $report += [pscustomobject]@{
