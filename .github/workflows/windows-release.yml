@@ -222,7 +222,13 @@ jobs:
           Copy-Item "crates/overlay-plugin/data/locale/en-US.ini" "release-assets/en-US.ini" -Force
           Copy-Item "QUICKSTART.md" "release-assets/QUICKSTART.md" -Force
           Copy-Item "INSTALL_FIRST.txt" "release-assets/INSTALL_FIRST.txt" -Force
-          Copy-Item "SoulMemoryOverlay-0.1.0-setup.exe" "release-assets/SoulMemoryOverlay-setup.exe" -Force
+          $installerExe = Get-ChildItem $env:GITHUB_WORKSPACE -Recurse -File -Filter "SoulMemoryOverlay-*-setup.exe" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installerExe) {
+            throw "Installer EXE not found after NSIS packaging"
+          }
+          Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
           Compress-Archive -Path "release-assets/*" -DestinationPath "release-assets/SoulMemoryOverlay-windows-x64.zip" -Force
 
       - name: Upload artifacts
