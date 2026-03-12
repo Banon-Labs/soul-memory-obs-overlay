@@ -310,6 +310,34 @@ jobs:
           $pfxPath = Join-Path $env:RUNNER_TEMP "windows-codesign.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
 
+          $pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new()
+          $pfxCert.Import(
+            $pfxPath,
+            $env:WINDOWS_CODESIGN_PFX_PASSWORD,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+          )
+
+          $addedTrustThumbprint = $null
+          if ($pfxCert.Subject -eq $pfxCert.Issuer) {
+            $addedTrustThumbprint = $pfxCert.Thumbprint
+            foreach ($storeName in @("Root", "TrustedPublisher")) {
+              $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                $storeName,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+              )
+              $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              try {
+                $alreadyPresent = $store.Certificates | Where-Object { $_.Thumbprint -eq $addedTrustThumbprint }
+                if (-not $alreadyPresent) {
+                  $store.Add($pfxCert)
+                }
+              }
+              finally {
+                $store.Close()
+              }
+            }
+          }
+
           try {
             foreach ($file in $filesToSign) {
               if (-not (Test-Path $file)) {
@@ -337,6 +365,24 @@ jobs:
             }
           }
           finally {
+            if ($addedTrustThumbprint) {
+              foreach ($storeName in @("TrustedPublisher", "Root")) {
+                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                  $storeName,
+                  [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                )
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                try {
+                  $store.Certificates |
+                    Where-Object { $_.Thumbprint -eq $addedTrustThumbprint } |
+                    ForEach-Object { $store.Remove($_) }
+                }
+                finally {
+                  $store.Close()
+                }
+              }
+            }
+
             if (Test-Path $pfxPath) {
               Remove-Item $pfxPath -Force
             }
