@@ -316,8 +316,10 @@ jobs:
             [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
           )
 
+          $isSelfSigned = $pfxCert.Subject -eq $pfxCert.Issuer
+
           $addedTrustThumbprint = $null
-          if ($pfxCert.Subject -eq $pfxCert.Issuer) {
+          if ($isSelfSigned) {
             $addedTrustThumbprint = $pfxCert.Thumbprint
             foreach ($storeName in @("Root", "TrustedPublisher")) {
               $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
@@ -343,7 +345,13 @@ jobs:
                 throw "File to sign not found: $file"
               }
 
-              & $signTool sign /fd SHA256 /tr $timestampUrl /td SHA256 /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $file
+              $signArgs = @("sign", "/fd", "SHA256", "/f", $pfxPath, "/p", $env:WINDOWS_CODESIGN_PFX_PASSWORD)
+              if (-not $isSelfSigned) {
+                $signArgs += @("/tr", $timestampUrl, "/td", "SHA256")
+              }
+              $signArgs += $file
+
+              & $signTool @signArgs
               if ($LASTEXITCODE -ne 0) {
                 throw "signtool sign failed for $file (exit code $LASTEXITCODE)"
               }
