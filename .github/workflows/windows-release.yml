@@ -310,8 +310,7 @@ jobs:
           $pfxPath = Join-Path $env:RUNNER_TEMP "windows-codesign.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
 
-          $pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new()
-          $pfxCert.Import(
+          $pfxCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
             $pfxPath,
             $env:WINDOWS_CODESIGN_PFX_PASSWORD,
             [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
