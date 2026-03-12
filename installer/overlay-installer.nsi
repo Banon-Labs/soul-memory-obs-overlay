@@ -20,14 +20,14 @@ RequestExecutionLevel admin
 
 Section "Install"
   SetOutPath "$INSTDIR\obs-plugins\64bit"
-  File "target\x86_64-pc-windows-msvc\release\overlay_plugin.dll"
-  File "target\x86_64-pc-windows-msvc\release\overlay-helper.exe"
+  File "target/x86_64-pc-windows-msvc/release/overlay_plugin.dll"
+  File "target/x86_64-pc-windows-msvc/release/overlay-helper.exe"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"
-  File "crates\overlay-plugin\data\config\overlay.toml"
+  File "crates/overlay-plugin/data/config/overlay.toml"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\locale"
-  File "crates\overlay-plugin\data\locale\en-US.ini"
+  File "crates/overlay-plugin/data/locale/en-US.ini"
 
   SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\obs-overlay-uninstall.exe"
