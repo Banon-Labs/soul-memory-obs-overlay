@@ -9,7 +9,7 @@ param(
   [string]$PfxPassword = $env:WINDOWS_CODESIGN_PFX_PASSWORD,
   [switch]$ReleaseContext,
   [int]$SignTimeoutSeconds = 180,
-  [bool]$AllowSelfSignedUntrusted = $true
+  [bool]$AllowSelfSignedUntrusted = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -222,6 +222,10 @@ try {
 
     if (-not $hasSigner) {
       throw "Signature verification failed for ${file}: signer certificate missing"
+    }
+
+    if ($isSelfSignedSigner -and -not $AllowSelfSignedUntrusted) {
+      throw "Self-signed signer is not allowed for ${file}. Configure a trusted code-signing certificate or enable testing override explicitly."
     }
 
     if ($signature.Status -ne "Valid") {

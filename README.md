@@ -85,6 +85,11 @@ Local signing harness (fast validation without running full release workflow):
 - Quick smoke test using a copied `notepad.exe` sample:
   - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run-signing-harness.ps1 -OutputDir artifacts/signing-harness -UseSystemNotepadSample`
 
+Workflow dispatch note:
+
+- `windows-release` now defaults to **strict trusted-signing mode**. A self-signed cert will fail signing unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- Microsoft Defender scan entries with `scan_status: "skipped"` now fail the run.
+
 ## License
 
 GPL-2.0-only (`LICENSE`). OBS plugin distribution remains GPL-compatible.

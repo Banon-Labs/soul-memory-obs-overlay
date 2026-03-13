@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      allow_self_signed:
+        description: "Allow self-signed cert status for signing (testing only)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -237,8 +242,19 @@ jobs:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
           WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
           WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+          WINDOWS_CODESIGN_ALLOW_SELF_SIGNED: ${{ vars.WINDOWS_CODESIGN_ALLOW_SELF_SIGNED }}
         run: |
           $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
+          $allowSelfSigned = $false
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $allowSelfSigned = "${{ inputs.allow_self_signed }}" -eq "true"
+          }
+          if (-not $allowSelfSigned -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
+            $allowSelfSigned = $env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED -eq "true"
+          }
+
+          Write-Host "Self-signed allowance enabled: $allowSelfSigned"
+
           ./scripts/sign-windows-artifacts.ps1 `
             -Files @(
               "release-assets/overlay_plugin.dll",
@@ -246,7 +262,8 @@ jobs:
               "release-assets/SoulMemoryOverlay-setup.exe"
             ) `
             -ReportPath "release-assets/signing-report.json" `
-            -ReleaseContext:$releaseContext
+            -ReleaseContext:$releaseContext `
+            -AllowSelfSignedUntrusted:$allowSelfSigned
 
       - name: Build archive and SHA256 manifest
         shell: pwsh
@@ -343,6 +360,7 @@ jobs:
 
           $hasDetection = $false
           $hasScanError = $false
+          $hasSkipped = $false
 
           foreach ($target in $scanTargets) {
             if (-not (Test-Path $target)) {
@@ -353,6 +371,9 @@ jobs:
             $scanOutput = & $mpCmdRun -Scan -ScanType 3 -File $resolvedTarget 2>&1
             $scanExit = $LASTEXITCODE
             Start-Sleep -Seconds 2
+
+            $scanDetail = ($scanOutput | Out-String).Trim()
+            $wasSkipped = $scanDetail -match '(?i)\bwas\s+skipped\b'
 
             $threat = Get-MpThreatDetection -ErrorAction SilentlyContinue |
               Where-Object {
@@ -366,6 +387,9 @@ jobs:
             if ($detected) {
               $hasDetection = $true
             }
+            if ($wasSkipped) {
+              $hasSkipped = $true
+            }
             if ($scanExit -ne 0 -and -not $detected) {
               $hasScanError = $true
             }
@@ -376,8 +400,8 @@ jobs:
               threat_name = if ($threat) { $threat.ThreatName } else { $null }
               severity = if ($threat) { $threat.SeverityID } else { $null }
               scan_exit_code = $scanExit
-              scan_status = if ($detected) { "detected" } elseif ($scanExit -eq 0) { "clean" } else { "scan-error" }
-              detail = ($scanOutput | Out-String).Trim()
+              scan_status = if ($detected) { "detected" } elseif ($wasSkipped) { "skipped" } elseif ($scanExit -eq 0) { "clean" } else { "scan-error" }
+              detail = $scanDetail
             }
           }
 
@@ -385,6 +409,10 @@ jobs:
 
           if ($hasDetection) {
             throw "Microsoft Defender detected one or more release assets. See release-assets/defender-scan-report.json"
+          }
+
+          if ($hasSkipped) {
+            throw "One or more Defender scans were skipped. See release-assets/defender-scan-report.json"
           }
 
           if ($hasScanError -and $releaseContext) {
