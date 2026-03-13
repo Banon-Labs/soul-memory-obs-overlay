@@ -231,7 +231,7 @@ jobs:
           Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
 
       - name: Sign and verify Windows binaries
-        timeout-minutes: 8
+        timeout-minutes: 15
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
@@ -253,11 +253,14 @@ jobs:
               if (-not $root -or -not (Test-Path $root)) {
                 continue
               }
-              $candidate = Get-ChildItem $root -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-                Sort-Object FullName -Descending |
-                Select-Object -First 1
-              if ($candidate) {
-                return $candidate.FullName
+
+              $versions = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending
+              foreach ($versionDir in $versions) {
+                $candidate = Join-Path $versionDir.FullName "x64/signtool.exe"
+                if (Test-Path $candidate) {
+                  return $candidate
+                }
               }
             }
 
@@ -298,10 +301,12 @@ jobs:
             return
           }
 
+          Write-Host "Resolving signtool path..."
           $signTool = Resolve-SignTool
           if (-not $signTool) {
             throw "signtool.exe not found on runner"
           }
+          Write-Host "Using signtool: $signTool"
 
           $timestampUrl = $env:WINDOWS_CODESIGN_TIMESTAMP_URL
           if ([string]::IsNullOrWhiteSpace($timestampUrl)) {
@@ -346,65 +351,58 @@ jobs:
                 throw "File to sign not found: $file"
               }
 
+              Write-Host "Signing file: $file"
               $signArgs = @("sign", "/fd", "SHA256", "/f", $pfxPath, "/p", $env:WINDOWS_CODESIGN_PFX_PASSWORD)
               if (-not $isSelfSigned) {
                 $signArgs += @("/tr", $timestampUrl, "/td", "SHA256")
               }
               $signArgs += $file
 
-              if ($isSelfSigned) {
-                $setSig = Set-AuthenticodeSignature -FilePath $file -Certificate $pfxCert -HashAlgorithm SHA256
-                if (-not $setSig -or $setSig.Status -eq "NotSigned") {
-                  throw "Set-AuthenticodeSignature failed for ${file}."
-                }
-              }
-              else {
-                $stdoutPath = Join-Path $env:RUNNER_TEMP ("signtool-" + [Guid]::NewGuid().ToString() + ".out")
-                $stderrPath = Join-Path $env:RUNNER_TEMP ("signtool-" + [Guid]::NewGuid().ToString() + ".err")
+              $stdoutPath = Join-Path $env:RUNNER_TEMP ("signtool-" + [Guid]::NewGuid().ToString() + ".out")
+              $stderrPath = Join-Path $env:RUNNER_TEMP ("signtool-" + [Guid]::NewGuid().ToString() + ".err")
 
-                $signProcess = Start-Process \
-                  -FilePath $signTool \
-                  -ArgumentList $signArgs \
-                  -NoNewWindow \
-                  -PassThru \
-                  -RedirectStandardOutput $stdoutPath \
-                  -RedirectStandardError $stderrPath
+              $signProcess = Start-Process \
+                -FilePath $signTool \
+                -ArgumentList $signArgs \
+                -NoNewWindow \
+                -PassThru \
+                -RedirectStandardOutput $stdoutPath \
+                -RedirectStandardError $stderrPath
 
-                try {
-                  if (-not $signProcess.WaitForExit(240000)) {
-                    try {
-                      $signProcess.Kill()
-                    }
-                    catch {
-                      Write-Warning "Failed to terminate timed-out signtool process: $($_.Exception.Message)"
-                    }
-
-                    $signOut = if (Test-Path $stdoutPath) { (Get-Content $stdoutPath -Raw).Trim() } else { "" }
-                    $signErr = if (Test-Path $stderrPath) { (Get-Content $stderrPath -Raw).Trim() } else { "" }
-                    throw "signtool timed out after 240 seconds for ${file}. stdout: $signOut stderr: $signErr"
+              try {
+                if (-not $signProcess.WaitForExit(180000)) {
+                  try {
+                    $signProcess.Kill()
+                  }
+                  catch {
+                    Write-Warning "Failed to terminate timed-out signtool process: $($_.Exception.Message)"
                   }
 
                   $signOut = if (Test-Path $stdoutPath) { (Get-Content $stdoutPath -Raw).Trim() } else { "" }
                   $signErr = if (Test-Path $stderrPath) { (Get-Content $stderrPath -Raw).Trim() } else { "" }
-
-                  if ($signProcess.ExitCode -ne 0) {
-                    throw "signtool sign failed for ${file} (exit code $($signProcess.ExitCode)). stdout: $signOut stderr: $signErr"
-                  }
-
-                  if ($signOut) {
-                    Write-Host $signOut
-                  }
-                  if ($signErr) {
-                    Write-Host $signErr
-                  }
+                  throw "signtool timed out after 180 seconds for ${file}. stdout: $signOut stderr: $signErr"
                 }
-                finally {
-                  if (Test-Path $stdoutPath) {
-                    Remove-Item $stdoutPath -Force
-                  }
-                  if (Test-Path $stderrPath) {
-                    Remove-Item $stderrPath -Force
-                  }
+
+                $signOut = if (Test-Path $stdoutPath) { (Get-Content $stdoutPath -Raw).Trim() } else { "" }
+                $signErr = if (Test-Path $stderrPath) { (Get-Content $stderrPath -Raw).Trim() } else { "" }
+
+                if ($signProcess.ExitCode -ne 0) {
+                  throw "signtool sign failed for ${file} (exit code $($signProcess.ExitCode)). stdout: $signOut stderr: $signErr"
+                }
+
+                if ($signOut) {
+                  Write-Host $signOut
+                }
+                if ($signErr) {
+                  Write-Host $signErr
+                }
+              }
+              finally {
+                if (Test-Path $stdoutPath) {
+                  Remove-Item $stdoutPath -Force
+                }
+                if (Test-Path $stderrPath) {
+                  Remove-Item $stderrPath -Force
                 }
               }
 
