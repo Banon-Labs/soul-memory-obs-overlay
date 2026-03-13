@@ -231,6 +231,7 @@ jobs:
           Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
 
       - name: Sign and verify Windows binaries
+        timeout-minutes: 8
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
