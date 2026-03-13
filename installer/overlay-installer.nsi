@@ -20,22 +20,25 @@ Var ObsPathDetected
 Var DetectedObsDir
 Var ProgramDataDir
 Var InstallMode
-Var PortableDetectNoticeShown
 Var ModePageDialog
 Var ModeStandardRadio
 Var ModePortableRadio
+Var DirectoryPageDialog
+Var DirectoryPathInput
+Var DirectoryBrowseButton
+Var DirectoryGuideLabel
+Var DirectoryStatusLabel
+
+!define STATUS_COLOR_INVALID 0x0000FF
+!define STATUS_COLOR_VALID 0x00AA00
 
 Name "${APP_NAME} ${PRODUCT_VERSION}"
 OutFile "SoulMemoryOverlay-${PRODUCT_VERSION}-setup.exe"
 InstallDir "$PROGRAMFILES64\obs-studio"
 RequestExecutionLevel admin
 
-!define MUI_DIRECTORYPAGE_TEXT_TOP "Choose installation folder."
-!define MUI_DIRECTORYPAGE_TEXT_DESTINATION "Installation folder"
-
 Page custom InstallModePageCreate InstallModePageLeave
-!define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPagePre
-!insertmacro MUI_PAGE_DIRECTORY
+Page custom DirectoryPageCreate DirectoryPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -49,7 +52,6 @@ Function .onInit
   ExpandEnvStrings $ProgramDataDir "%ProgramData%"
   StrCmp $ProgramDataDir "" 0 +2
     StrCpy $ProgramDataDir "C:\ProgramData"
-  StrCpy $PortableDetectNoticeShown "0"
   Call DetectObsInstallDir
 FunctionEnd
 
@@ -88,6 +90,135 @@ Function InstallModePageLeave
   StrCpy $InstallMode "${INSTALL_MODE_STANDARD}"
 FunctionEnd
 
+Function NormalizePortableInstallDir
+  IfFileExists "$INSTDIR\bin\64bit\obs64.exe" valid 0
+  IfFileExists "$INSTDIR\obs64.exe" 0 invalid
+  ${GetParent} "$INSTDIR" $1
+  ${GetParent} "$1" $2
+  IfFileExists "$2\bin\64bit\obs64.exe" 0 invalid
+  StrCpy $INSTDIR "$2"
+  Goto valid
+
+invalid:
+  StrCpy $0 "0"
+  Return
+
+valid:
+  StrCpy $0 "1"
+FunctionEnd
+
+Function UpdateDirectoryStatus
+  ${NSD_GetText} $DirectoryPathInput $INSTDIR
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_status standard_status
+
+standard_status:
+  StrLen $0 $INSTDIR
+  IntCmp $0 3 standard_invalid standard_invalid standard_valid
+
+standard_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select a plugin folder path to continue."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Return
+
+standard_valid:
+  ${NSD_SetText} $DirectoryStatusLabel "Path looks valid for Standard mode."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
+  Return
+
+portable_status:
+  Call NormalizePortableInstallDir
+  StrCmp $0 "1" portable_valid portable_invalid
+
+portable_valid:
+  ${NSD_SetText} $DirectoryStatusLabel "Valid OBS folder detected."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
+  ${NSD_SetText} $DirectoryPathInput $INSTDIR
+  Return
+
+portable_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select the OBS folder that contains bin\\64bit\\obs64.exe."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+FunctionEnd
+
+Function OnDirectoryPathChange
+  Pop $0
+  Call UpdateDirectoryStatus
+FunctionEnd
+
+Function OnDirectoryBrowse
+  Pop $0
+  ${NSD_GetText} $DirectoryPathInput $0
+  nsDialogs::SelectFolderDialog "Select installation folder" $0
+  Pop $1
+  StrCmp $1 "error" done 0
+  ${NSD_SetText} $DirectoryPathInput $1
+
+done:
+  Call UpdateDirectoryStatus
+FunctionEnd
+
+Function DirectoryPageCreate
+  Call DirectoryPagePre
+
+  nsDialogs::Create 1018
+  Pop $DirectoryPageDialog
+  StrCmp $DirectoryPageDialog "error" 0 +2
+    Abort
+
+  ${NSD_CreateLabel} 0 0 100% 14u "Choose installation folder."
+  Pop $0
+
+  ${NSD_CreateLabel} 0 18u 100% 24u ""
+  Pop $DirectoryGuideLabel
+
+  ${NSD_CreateDirRequest} 0 46u 78% 12u "$INSTDIR"
+  Pop $DirectoryPathInput
+  ${NSD_OnChange} $DirectoryPathInput OnDirectoryPathChange
+
+  ${NSD_CreateBrowseButton} 80% 46u 20% 12u "Browse..."
+  Pop $DirectoryBrowseButton
+  ${NSD_OnClick} $DirectoryBrowseButton OnDirectoryBrowse
+
+  ${NSD_CreateLabel} 0 62u 100% 24u ""
+  Pop $DirectoryStatusLabel
+
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" 0 standard_guide
+  ${NSD_SetText} $DirectoryGuideLabel "Portable/custom mode: select the OBS folder that contains bin\\64bit\\obs64.exe."
+  Goto guide_done
+
+standard_guide:
+  ${NSD_SetText} $DirectoryGuideLabel "Standard mode installs to ProgramData plugin layout by default."
+
+guide_done:
+  Call UpdateDirectoryStatus
+  nsDialogs::Show
+FunctionEnd
+
+Function DirectoryPageLeave
+  ${NSD_GetText} $DirectoryPathInput $INSTDIR
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_leave standard_leave
+
+standard_leave:
+  StrLen $0 $INSTDIR
+  IntCmp $0 3 standard_invalid standard_invalid directory_valid
+
+standard_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select a plugin folder path to continue."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+portable_leave:
+  Call NormalizePortableInstallDir
+  StrCmp $0 "1" directory_valid portable_invalid
+
+portable_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Portable/custom mode requires an OBS folder containing bin\\64bit\\obs64.exe."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+directory_valid:
+FunctionEnd
+
 Function DirectoryPagePre
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_mode standard_mode
 
@@ -100,14 +231,10 @@ portable_mode:
 
 not_detected:
   StrCpy $INSTDIR "$PROGRAMFILES64\obs-studio"
-  StrCmp $PortableDetectNoticeShown "1" portable_text 0
-  MessageBox MB_ICONINFORMATION "OBS installation could not be auto-detected. In Portable/custom mode, click Browse and select the OBS folder that contains bin\\64bit\\obs64.exe."
-  StrCpy $PortableDetectNoticeShown "1"
   Goto portable_text
 
 detected:
   StrCpy $INSTDIR $DetectedObsDir
-  StrCpy $PortableDetectNoticeShown "1"
 
 portable_text:
 FunctionEnd
@@ -220,11 +347,9 @@ portable_verify:
   Goto valid
 
 invalid_standard:
-  MessageBox MB_ICONEXCLAMATION "Standard mode requires a plugin folder path (for example C:\\ProgramData\\obs-studio\\plugins\\soul-memory-obs-overlay)."
   Abort
 
 invalid:
-  MessageBox MB_ICONEXCLAMATION "Portable/custom mode requires the OBS installation folder. It must contain bin\\64bit\\obs64.exe (for example C:\\Program Files\\obs-studio)."
   Abort
 valid:
 FunctionEnd
