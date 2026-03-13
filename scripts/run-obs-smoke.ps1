@@ -18,10 +18,24 @@ function Get-PluginLayoutState {
     [string]$ObsRootDir
   )
 
+  $standardPluginPath = Join-Path $StandardBase "bin/64bit/soul-memory-obs-overlay.dll"
+  $legacyStandardPluginPath = Join-Path $StandardBase "bin/64bit/overlay_plugin.dll"
+  $portablePluginPath = Join-Path $ObsRootDir "obs-plugins/64bit/overlay_plugin.dll"
+
+  $standardPluginPresent = (Test-Path $standardPluginPath) -or (Test-Path $legacyStandardPluginPath)
+  $standardPluginName = $null
+  if (Test-Path $standardPluginPath) {
+    $standardPluginName = "soul-memory-obs-overlay.dll"
+  }
+  elseif (Test-Path $legacyStandardPluginPath) {
+    $standardPluginName = "overlay_plugin.dll"
+  }
+
   $state = [ordered]@{
-    standard_plugin_dll = Test-Path (Join-Path $StandardBase "bin/64bit/overlay_plugin.dll")
+    standard_plugin_dll = $standardPluginPresent
+    standard_plugin_dll_name = $standardPluginName
     standard_helper_exe = Test-Path (Join-Path $StandardBase "bin/64bit/overlay-helper.exe")
-    portable_plugin_dll = Test-Path (Join-Path $ObsRootDir "obs-plugins/64bit/overlay_plugin.dll")
+    portable_plugin_dll = Test-Path $portablePluginPath
     portable_helper_exe = Test-Path (Join-Path $ObsRootDir "obs-plugins/64bit/overlay-helper.exe")
   }
 
@@ -52,6 +66,7 @@ if ([string]::IsNullOrWhiteSpace($programData)) {
 
 $standardBase = Join-Path $programData "obs-studio/plugins/soul-memory-obs-overlay"
 
+Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/soul-memory-obs-overlay.dll")
 Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/overlay_plugin.dll")
 Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/overlay-helper.exe")
 Remove-PathIfExists -Path (Join-Path $ObsRoot "obs-plugins/64bit/overlay_plugin.dll")
@@ -111,9 +126,9 @@ if (Test-Path $obsStdErrPath) {
   $logText += "`n" + (Get-Content -Path $obsStdErrPath -Raw)
 }
 
-$containsPluginDll = $logText -match "overlay_plugin\\.dll"
+$containsPluginDll = $logText -match "overlay_plugin\\.dll|soul-memory-obs-overlay\\.dll"
 $containsModuleName = $logText -match "soul-memory-obs-overlay|Soul Memory Overlay|soul_memory_overlay_source"
-$overlayLoadFailure = $logText -match "Failed to load module.*overlay_plugin\\.dll|Module .*overlay_plugin\\.dll.*not loaded|LoadLibrary failed.*overlay_plugin\\.dll"
+$overlayLoadFailure = $logText -match "Failed to load module.*(overlay_plugin|soul-memory-obs-overlay)\\.dll|Module .*(overlay_plugin|soul-memory-obs-overlay)\\.dll.*not loaded|LoadLibrary failed.*(overlay_plugin|soul-memory-obs-overlay)\\.dll"
 $sourceVisibleInferred = ($containsPluginDll -or $containsModuleName) -and (-not $overlayLoadFailure)
 
 $report = [ordered]@{

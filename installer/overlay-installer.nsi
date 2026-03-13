@@ -9,7 +9,8 @@
 
 !define APP_NAME "Soul Memory OBS Overlay"
 !define COMPANY_NAME "soul-memory-obs-overlay"
-!define DLL_NAME "overlay_plugin.dll"
+!define STANDARD_DLL_NAME "soul-memory-obs-overlay.dll"
+!define PORTABLE_DLL_NAME "overlay_plugin.dll"
 !define HELPER_EXE "overlay-helper.exe"
 !define PRODUCT_VERSION "0.1.3"
 !define OBS_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OBS Studio_is1"
@@ -409,8 +410,9 @@ install_standard:
   Call CleanupLegacyObsRootInstall
 
   SetOutPath "$INSTDIR\bin\64bit"
-  File "${PROJECT_ROOT}\installer\staging\overlay_plugin.dll"
-  File "${PROJECT_ROOT}\installer\staging\overlay-helper.exe"
+  Delete "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}"
+  File /oname=${STANDARD_DLL_NAME} "${PROJECT_ROOT}\installer\staging\${PORTABLE_DLL_NAME}"
+  File "${PROJECT_ROOT}\installer\staging\${HELPER_EXE}"
 
   SetOutPath "$INSTDIR\data\config"
   File "${PROJECT_ROOT}\installer\staging\overlay.toml"
@@ -424,8 +426,8 @@ install_standard:
 
 install_portable:
   SetOutPath "$INSTDIR\obs-plugins\64bit"
-  File "${PROJECT_ROOT}\installer\staging\overlay_plugin.dll"
-  File "${PROJECT_ROOT}\installer\staging\overlay-helper.exe"
+  File "${PROJECT_ROOT}\installer\staging\${PORTABLE_DLL_NAME}"
+  File "${PROJECT_ROOT}\installer\staging\${HELPER_EXE}"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"
   File "${PROJECT_ROOT}\installer\staging\overlay.toml"
@@ -522,7 +524,10 @@ un.cleanup_done:
 FunctionEnd
 
 Section "Uninstall"
-  IfFileExists "$INSTDIR\bin\64bit\overlay_plugin.dll" uninstall_standard uninstall_portable_check
+  IfFileExists "$INSTDIR\bin\64bit\${STANDARD_DLL_NAME}" uninstall_standard uninstall_standard_legacy_check
+
+uninstall_standard_legacy_check:
+  IfFileExists "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}" uninstall_standard uninstall_portable_check
 
 uninstall_standard:
   StrCpy $R9 $INSTDIR
@@ -531,8 +536,9 @@ uninstall_standard:
   StrCpy $INSTDIR $R9
   Call un.CleanupLegacyObsRootInstall
 
-  Delete "$INSTDIR\bin\64bit\overlay_plugin.dll"
-  Delete "$INSTDIR\bin\64bit\overlay-helper.exe"
+  Delete "$INSTDIR\bin\64bit\${STANDARD_DLL_NAME}"
+  Delete "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}"
+  Delete "$INSTDIR\bin\64bit\${HELPER_EXE}"
   Delete "$INSTDIR\data\config\overlay.toml"
   Delete "$INSTDIR\data\locale\en-US.ini"
   Delete "$INSTDIR\obs-overlay-uninstall.exe"
@@ -545,11 +551,11 @@ uninstall_standard:
   Goto uninstall_done
 
 uninstall_portable_check:
-  IfFileExists "$INSTDIR\obs-plugins\64bit\overlay_plugin.dll" uninstall_portable uninstall_done
+  IfFileExists "$INSTDIR\obs-plugins\64bit\${PORTABLE_DLL_NAME}" uninstall_portable uninstall_done
 
 uninstall_portable:
-  Delete "$INSTDIR\obs-plugins\64bit\overlay_plugin.dll"
-  Delete "$INSTDIR\obs-plugins\64bit\overlay-helper.exe"
+  Delete "$INSTDIR\obs-plugins\64bit\${PORTABLE_DLL_NAME}"
+  Delete "$INSTDIR\obs-plugins\64bit\${HELPER_EXE}"
   Delete "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config\overlay.toml"
   Delete "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\locale\en-US.ini"
   RMDir "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"
