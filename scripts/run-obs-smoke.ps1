@@ -57,11 +57,14 @@ Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/overlay-helper.exe
 Remove-PathIfExists -Path (Join-Path $ObsRoot "obs-plugins/64bit/overlay_plugin.dll")
 Remove-PathIfExists -Path (Join-Path $ObsRoot "obs-plugins/64bit/overlay-helper.exe")
 
-$standardInstall = Start-Process -FilePath $installerFullPath.Path -ArgumentList "/S" -PassThru -Wait
+$standardInstall = Start-Process -FilePath $installerFullPath.Path -ArgumentList @("/S", "/D=$standardBase") -PassThru -Wait
 $postStandardState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
 
+$beforeObsRootAttemptState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
 $obsRootAttempt = Start-Process -FilePath $installerFullPath.Path -ArgumentList @("/S", "/D=$ObsRoot") -PassThru -Wait
-$obsRootRejected = $obsRootAttempt.ExitCode -ne 0
+$afterObsRootAttemptState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
+$obsRootAttemptWrotePortable = $afterObsRootAttemptState.portable_plugin_dll -or $afterObsRootAttemptState.portable_helper_exe
+$obsRootRejected = ($obsRootAttempt.ExitCode -ne 0) -or (-not $obsRootAttemptWrotePortable)
 
 $logDir = Join-Path $env:APPDATA "obs-studio/logs"
 if (-not (Test-Path $logDir)) {
@@ -117,6 +120,7 @@ $report = [ordered]@{
   obs_root = $ObsRoot
   standard_install_exit_code = $standardInstall.ExitCode
   obs_root_attempt_exit_code = $obsRootAttempt.ExitCode
+  obs_root_attempt_wrote_portable_layout = $obsRootAttemptWrotePortable
   obs_root_rejected_in_standard_mode = $obsRootRejected
   post_standard_layout = $postStandardState
   obs_log_path = if ($newestLog) { $newestLog.FullName } else { $null }
