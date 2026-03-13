@@ -54,8 +54,9 @@ Step "Validate update status surface" {
 
 Step "Review CI signing and AV scan evidence" {
   Write-Host "From the latest windows-release workflow artifacts, download and inspect:"
+  Write-Host "- If using workflow_dispatch, set runner_labels_json to a Defender-capable profile (example: [\"self-hosted\",\"windows\",\"x64\",\"defender-enabled\"])."
   Write-Host "- signing-report.json (expect status=Valid for overlay_plugin.dll, overlay-helper.exe, SoulMemoryOverlay-setup.exe)"
-  Write-Host "- defender-scan-report.json (expect scan_status=clean and detected=false for scanned assets; any skipped status is a release-blocker)"
+  Write-Host "- defender-scan-report.json (expect scan_status=clean and detected=false for scanned assets; any skipped or unscannable-environment status is a release-blocker)"
   Write-Host "- SHA256SUMS.txt (archive and asset hashes published for reproducibility and vendor submissions)"
 }
 

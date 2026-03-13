@@ -17,6 +17,7 @@ The plugin auto-starts the helper process when the source is active.
 - The installer now has two explicit modes:
   - **Standard (recommended)** installs to `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay`.
   - **Portable/custom OBS** installs to OBS root layout (`obs-plugins/64bit` and `data/obs-plugins/...`).
+- Mode/path rule: OBS installation folders (`...\obs-studio` containing `bin\64bit\obs64.exe`) should use **Portable/custom** mode. Standard mode is for ProgramData plugin layout paths.
 - In Portable/custom mode, the installer validates that the selected folder contains `bin\64bit\obs64.exe`.
 - If OBS auto-detection fails in Portable/custom mode, use **Browse** and select the correct OBS folder manually.
 - During Standard-mode upgrades, the installer removes this plugin's legacy OBS-root files from the detected OBS installation to prevent duplicate loads.
@@ -55,7 +56,10 @@ Migration behavior:
   - Verify anti-cheat or security software is not blocking memory access.
 - **Source not visible in OBS source list**
   - Restart OBS after install.
-  - Confirm `overlay_plugin.dll` exists in OBS `obs-plugins/64bit`.
+  - Confirm plugin files exist in the selected install target:
+    - Standard mode: `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay_plugin.dll`
+    - Portable/custom mode: `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
+  - Check `%AppData%\obs-studio\logs\` (or `Help -> Log Files -> View Current Log`) for `overlay_plugin.dll`, `soul-memory-obs-overlay`, or `Failed to load module` lines.
 - **Installer cannot find OBS automatically in Portable/custom mode**
   - Click **Browse** and select the folder that contains `bin\64bit\obs64.exe`.
 
@@ -88,7 +92,9 @@ Local signing harness (fast validation without running full release workflow):
 Workflow dispatch note:
 
 - `windows-release` now defaults to **strict trusted-signing mode**. A self-signed cert will fail signing unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- `windows-release` accepts `runner_labels_json` for selecting a Defender-capable runner profile (example: `["self-hosted","windows","x64","defender-enabled"]`).
 - Microsoft Defender scan entries with `scan_status: "skipped"` now fail the run.
+- The workflow also fails on `scan_status: "unscannable-environment"` (for example, hosted runners where Defender is disabled or full-drive exclusions prevent meaningful scans). Use a Defender-enabled Windows runner without broad root-drive exclusions for release validation.
 
 ## License
 

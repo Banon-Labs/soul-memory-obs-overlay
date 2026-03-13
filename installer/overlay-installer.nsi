@@ -108,6 +108,21 @@ valid:
   StrCpy $0 "1"
 FunctionEnd
 
+Function DetectObsRootLikePath
+  IfFileExists "$INSTDIR\bin\64bit\obs64.exe" found 0
+  IfFileExists "$INSTDIR\obs64.exe" 0 not_found
+  ${GetParent} "$INSTDIR" $1
+  ${GetParent} "$1" $2
+  IfFileExists "$2\bin\64bit\obs64.exe" 0 not_found
+
+found:
+  StrCpy $0 "1"
+  Return
+
+not_found:
+  StrCpy $0 "0"
+FunctionEnd
+
 Function UpdateDirectoryStatus
   StrCmp $DirectoryStatusUpdateGuard "1" already_updating
   StrCpy $DirectoryStatusUpdateGuard "1"
@@ -116,6 +131,15 @@ Function UpdateDirectoryStatus
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_status standard_status
 
 standard_status:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" standard_obs_root standard_path_check
+
+standard_obs_root:
+  ${NSD_SetText} $DirectoryStatusLabel "This looks like an OBS folder. Use Portable/custom mode for OBS install directories."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Goto done
+
+standard_path_check:
   StrLen $0 $INSTDIR
   IntCmp $0 3 standard_invalid standard_invalid standard_valid
 
@@ -125,7 +149,7 @@ standard_invalid:
   Goto done
 
 standard_valid:
-  ${NSD_SetText} $DirectoryStatusLabel "Path looks valid for Standard mode."
+  ${NSD_SetText} $DirectoryStatusLabel "Standard mode target looks valid (plugin files go to this folder's bin\\64bit and data subfolders)."
   SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
   Goto done
 
@@ -212,6 +236,15 @@ Function DirectoryPageLeave
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_leave standard_leave
 
 standard_leave:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" standard_obs_root_leave standard_leave_path_check
+
+standard_obs_root_leave:
+  ${NSD_SetText} $DirectoryStatusLabel "That path is an OBS folder. Switch to Portable/custom mode for OBS install directories."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+standard_leave_path_check:
   StrLen $0 $INSTDIR
   IntCmp $0 3 standard_invalid standard_invalid directory_valid
 
@@ -344,6 +377,8 @@ Function .onVerifyInstDir
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_verify standard_verify
 
 standard_verify:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" invalid_standard 0
   StrLen $0 $INSTDIR
   IntCmp $0 3 invalid_standard invalid_standard standard_continue
 

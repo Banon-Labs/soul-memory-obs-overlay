@@ -21,14 +21,27 @@ on:
         required: false
         default: false
         type: boolean
+      runner_labels_json:
+        description: "JSON array for runs-on labels (example: [\"self-hosted\",\"windows\",\"x64\",\"defender-enabled\"])"
+        required: false
+        default: '["windows-latest"]'
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJson(inputs.runner_labels_json) || fromJson('["windows-latest"]') }}
     steps:
+      - name: Show runner selection
+        shell: pwsh
+        run: |
+          $selected = "${{ github.event_name == 'workflow_dispatch' && inputs.runner_labels_json || '[\"windows-latest\"]' }}"
+          Write-Host "Selected runner labels: $selected"
+          Write-Host "Runner name: $env:RUNNER_NAME"
+          Write-Host "Runner OS/arch: $env:RUNNER_OS / $env:RUNNER_ARCH"
+
       - name: Checkout
         uses: actions/checkout@v4
 

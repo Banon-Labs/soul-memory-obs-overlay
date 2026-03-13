@@ -6,6 +6,9 @@ If you are not technical, do this exactly:
 2) Run SoulMemoryOverlay-<version>-setup.exe normally (NOT as Administrator).
    - Choose Standard (recommended) for normal OBS installs (ProgramData plugin layout).
    - Choose Portable/custom OBS only if needed, then select the OBS folder containing bin\64bit\obs64.exe.
+   - Do not mix modes for the same folder:
+     * If you select an OBS folder path, use Portable/custom mode.
+     * If you select a ProgramData plugin path, use Standard mode.
 3) Open OBS Studio.
 4) In Sources, click + and choose "Soul Memory Overlay".
 5) Start Dark Souls II and load your character.
@@ -16,6 +19,20 @@ If the source says "Disconnected":
 - Make sure the game process is DarkSoulsII.exe
 - Remove and add the source again in OBS
 - Restart OBS
+
+If "Soul Memory Overlay" is not in the Sources list after restart:
+- Verify install files for your selected mode:
+  * Standard mode:
+    - C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay_plugin.dll
+    - C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay-helper.exe
+  * Portable/custom mode:
+    - <OBS folder>\obs-plugins\64bit\overlay_plugin.dll
+    - <OBS folder>\obs-plugins\64bit\overlay-helper.exe
+- In OBS: Help -> Log Files -> View Current Log (or Upload Current Log).
+- Check latest log file in %AppData%\obs-studio\logs\ for lines containing:
+  * overlay_plugin.dll
+  * soul-memory-obs-overlay
+  * Failed to load module
 
 Need more help?
 Open QUICKSTART.md for step-by-step instructions.
