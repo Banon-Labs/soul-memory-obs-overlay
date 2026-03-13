@@ -28,6 +28,7 @@ Var DirectoryPathInput
 Var DirectoryBrowseButton
 Var DirectoryGuideLabel
 Var DirectoryStatusLabel
+Var DirectoryStatusUpdateGuard
 
 !define STATUS_COLOR_INVALID 0x0000FF
 !define STATUS_COLOR_VALID 0x00AA00
@@ -108,6 +109,9 @@ valid:
 FunctionEnd
 
 Function UpdateDirectoryStatus
+  StrCmp $DirectoryStatusUpdateGuard "1" already_updating
+  StrCpy $DirectoryStatusUpdateGuard "1"
+
   ${NSD_GetText} $DirectoryPathInput $INSTDIR
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_status standard_status
 
@@ -118,12 +122,12 @@ standard_status:
 standard_invalid:
   ${NSD_SetText} $DirectoryStatusLabel "Select a plugin folder path to continue."
   SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
-  Return
+  Goto done
 
 standard_valid:
   ${NSD_SetText} $DirectoryStatusLabel "Path looks valid for Standard mode."
   SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
-  Return
+  Goto done
 
 portable_status:
   Call NormalizePortableInstallDir
@@ -132,12 +136,20 @@ portable_status:
 portable_valid:
   ${NSD_SetText} $DirectoryStatusLabel "Valid OBS folder detected."
   SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
+  ${NSD_GetText} $DirectoryPathInput $1
+  StrCmp $1 $INSTDIR done 0
   ${NSD_SetText} $DirectoryPathInput $INSTDIR
-  Return
+  Goto done
 
 portable_invalid:
   ${NSD_SetText} $DirectoryStatusLabel "Select the OBS folder that contains bin\\64bit\\obs64.exe."
   SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+
+done:
+  StrCpy $DirectoryStatusUpdateGuard "0"
+  Return
+
+already_updating:
 FunctionEnd
 
 Function OnDirectoryPathChange
@@ -159,6 +171,7 @@ FunctionEnd
 
 Function DirectoryPageCreate
   Call DirectoryPagePre
+  StrCpy $DirectoryStatusUpdateGuard "0"
 
   nsDialogs::Create 1018
   Pop $DirectoryPageDialog
