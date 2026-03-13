@@ -296,6 +296,22 @@ jobs:
         shell: pwsh
         run: |
           function Resolve-MpCmdRun {
+            $platformRoot = "C:/ProgramData/Microsoft/Windows Defender/Platform"
+            if (Test-Path $platformRoot) {
+              $platformExecutables = Get-ChildItem $platformRoot -Recurse -Filter MpCmdRun.exe -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending
+
+              $x64Executable = $platformExecutables | Where-Object { $_.FullName -match '[\\/]x64[\\/]MpCmdRun\.exe$' } | Select-Object -First 1
+              if ($x64Executable) {
+                return $x64Executable.FullName
+              }
+
+              $platformExe = $platformExecutables | Select-Object -First 1
+              if ($platformExe) {
+                return $platformExe.FullName
+              }
+            }
+
             $candidatePaths = @(
               (Join-Path $env:ProgramFiles "Windows Defender/MpCmdRun.exe"),
               (Join-Path $env:ProgramFiles "Microsoft Defender/MpCmdRun.exe")
@@ -304,16 +320,6 @@ jobs:
             foreach ($candidate in $candidatePaths) {
               if ($candidate -and (Test-Path $candidate)) {
                 return $candidate
-              }
-            }
-
-            $platformRoot = "C:/ProgramData/Microsoft/Windows Defender/Platform"
-            if (Test-Path $platformRoot) {
-              $platformExe = Get-ChildItem $platformRoot -Recurse -Filter MpCmdRun.exe -ErrorAction SilentlyContinue |
-                Sort-Object FullName -Descending |
-                Select-Object -First 1
-              if ($platformExe) {
-                return $platformExe.FullName
               }
             }
 
