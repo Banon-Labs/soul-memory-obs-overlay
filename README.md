@@ -78,6 +78,13 @@ Check whether required names exist:
 - `bash scripts/setup-codesign-secrets.sh --check`
 - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -Check`
 
+Local signing harness (fast validation without running full release workflow):
+
+- Sign a local EXE/DLL with an ephemeral self-signed cert and write `signing-report.json`:
+  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run-signing-harness.ps1 -OutputDir artifacts/signing-harness -Files "C:\path\to\overlay-helper.exe"`
+- Quick smoke test using a copied `notepad.exe` sample:
+  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run-signing-harness.ps1 -OutputDir artifacts/signing-harness -UseSystemNotepadSample`
+
 ## License
 
 GPL-2.0-only (`LICENSE`). OBS plugin distribution remains GPL-compatible.
