@@ -245,11 +245,11 @@ jobs:
           WINDOWS_CODESIGN_ALLOW_SELF_SIGNED: ${{ vars.WINDOWS_CODESIGN_ALLOW_SELF_SIGNED }}
         run: |
           $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
-          $allowSelfSigned = $false
+          $allowSelfSigned = -not $releaseContext
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $allowSelfSigned = "${{ inputs.allow_self_signed }}" -eq "true"
           }
-          if (-not $allowSelfSigned -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
             $allowSelfSigned = $env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED -eq "true"
           }
 
@@ -335,15 +335,27 @@ jobs:
           )
 
           $mpCmdRun = Resolve-MpCmdRun
+          $hasPreferenceCmd = $null -ne (Get-Command Get-MpPreference -ErrorAction SilentlyContinue)
           $hasThreatCmd = $null -ne (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue)
+          $hasStatusCmd = $null -ne (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)
           $report = @()
 
-          if (-not $mpCmdRun -or -not $hasThreatCmd) {
-            $reason = if (-not $mpCmdRun) {
-              "MpCmdRun.exe is unavailable on runner"
-            } else {
-              "Get-MpThreatDetection is unavailable on runner"
+          if (-not $mpCmdRun -or -not $hasThreatCmd -or -not $hasPreferenceCmd -or -not $hasStatusCmd) {
+            $missing = @()
+            if (-not $mpCmdRun) {
+              $missing += "MpCmdRun.exe"
             }
+            if (-not $hasThreatCmd) {
+              $missing += "Get-MpThreatDetection"
+            }
+            if (-not $hasPreferenceCmd) {
+              $missing += "Get-MpPreference"
+            }
+            if (-not $hasStatusCmd) {
+              $missing += "Get-MpComputerStatus"
+            }
+
+            $reason = "Defender tooling unavailable on runner: $($missing -join ', ')"
 
             $report += [pscustomobject]@{
               asset = "(all)"
@@ -358,6 +370,57 @@ jobs:
 
             if ($releaseContext) {
               throw $reason
+            }
+
+            Write-Warning $reason
+            return
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+          $preference = Get-MpPreference -ErrorAction SilentlyContinue
+          $environmentIssues = @()
+
+          if ($status) {
+            if (-not $status.AMServiceEnabled) {
+              $environmentIssues += "AM service is disabled"
+            }
+            if (-not $status.AntivirusEnabled) {
+              $environmentIssues += "Antivirus engine is disabled"
+            }
+            if ($status.RealTimeProtectionEnabled -eq $false) {
+              $environmentIssues += "Real-time protection is disabled"
+            }
+          } else {
+            $environmentIssues += "Get-MpComputerStatus did not return status data"
+          }
+
+          if ($preference) {
+            $excludedRoots = @($preference.ExclusionPath | Where-Object { $_ -is [string] } | ForEach-Object { $_.Trim().ToLowerInvariant() })
+            $globalRootExclusions = @($excludedRoots | Where-Object { $_ -match '^[a-z]:\\$' -or $_ -match '^[a-z]:$' })
+            if ($globalRootExclusions.Count -gt 0) {
+              $environmentIssues += "Full drive exclusions configured: $($globalRootExclusions -join ', ')"
+            }
+          } else {
+            $environmentIssues += "Get-MpPreference did not return preference data"
+          }
+
+          if ($environmentIssues.Count -gt 0) {
+            $reason = "Defender environment cannot provide meaningful on-demand file scans on this runner. $($environmentIssues -join '; ')"
+
+            $report += [pscustomobject]@{
+              asset = "(environment)"
+              detected = $null
+              threat_name = $null
+              severity = $null
+              scan_exit_code = $null
+              scan_status = "unscannable-environment"
+              detail = $reason
+            }
+
+            $report | ConvertTo-Json -Depth 5 | Out-File -FilePath "release-assets/defender-scan-report.json" -Encoding utf8
+
+            if ($releaseContext) {
+              throw "$reason Use a Windows runner with Defender AV enabled and without full-drive exclusions."
             }
 
             Write-Warning $reason
