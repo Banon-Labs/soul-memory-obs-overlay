@@ -23,13 +23,14 @@ If the source says "Disconnected":
 If "Soul Memory Overlay" is not in the Sources list after restart:
 - Verify install files for your selected mode:
   * Standard mode:
-    - C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay_plugin.dll
+    - C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll
     - C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay-helper.exe
   * Portable/custom mode:
     - <OBS folder>\obs-plugins\64bit\overlay_plugin.dll
     - <OBS folder>\obs-plugins\64bit\overlay-helper.exe
 - In OBS: Help -> Log Files -> View Current Log (or Upload Current Log).
 - Check latest log file in %AppData%\obs-studio\logs\ for lines containing:
+  * soul-memory-obs-overlay.dll
   * overlay_plugin.dll
   * soul-memory-obs-overlay
   * Failed to load module

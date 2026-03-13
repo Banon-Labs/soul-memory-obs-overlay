@@ -33,7 +33,7 @@ Use either method:
 
 Uninstall removes:
 
-- Standard mode: `bin/64bit/overlay_plugin.dll`, `bin/64bit/overlay-helper.exe`, `data/config/overlay.toml`, `data/locale/en-US.ini`
+- Standard mode: `bin/64bit/soul-memory-obs-overlay.dll`, `bin/64bit/overlay-helper.exe`, `data/config/overlay.toml`, `data/locale/en-US.ini`
 - Portable/custom mode: `obs-plugins/64bit/overlay_plugin.dll`, `obs-plugins/64bit/overlay-helper.exe`, `data/obs-plugins/soul-memory-obs-overlay/*`
 
 Migration behavior:
@@ -57,9 +57,9 @@ Migration behavior:
 - **Source not visible in OBS source list**
   - Restart OBS after install.
   - Confirm plugin files exist in the selected install target:
-    - Standard mode: `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay_plugin.dll`
+    - Standard mode: `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll`
     - Portable/custom mode: `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
-  - Check `%AppData%\obs-studio\logs\` (or `Help -> Log Files -> View Current Log`) for `overlay_plugin.dll`, `soul-memory-obs-overlay`, or `Failed to load module` lines.
+  - Check `%AppData%\obs-studio\logs\` (or `Help -> Log Files -> View Current Log`) for `soul-memory-obs-overlay.dll`, `overlay_plugin.dll`, `soul-memory-obs-overlay`, or `Failed to load module` lines.
 - **Installer cannot find OBS automatically in Portable/custom mode**
   - Click **Browse** and select the folder that contains `bin\64bit\obs64.exe`.
 

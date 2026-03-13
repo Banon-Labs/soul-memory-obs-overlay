@@ -50,13 +50,14 @@ If you do not see **Soul Memory Overlay** in OBS after relaunch:
 
 1. Confirm files exist for your selected mode:
    - Standard mode:
-     - `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay_plugin.dll`
+     - `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll`
      - `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay-helper.exe`
    - Portable/custom mode:
      - `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
      - `<OBS folder>\obs-plugins\64bit\overlay-helper.exe`
 2. In OBS, open `Help -> Log Files -> View Current Log`.
 3. In `%AppData%\obs-studio\logs\`, inspect the newest log for:
+   - `soul-memory-obs-overlay.dll`
    - `overlay_plugin.dll`
    - `soul-memory-obs-overlay`
    - `Failed to load module`
