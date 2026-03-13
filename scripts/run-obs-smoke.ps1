@@ -68,12 +68,21 @@ if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 
+$obsStdOutPath = Join-Path $env:TEMP "obs-smoke-stdout.log"
+$obsStdErrPath = Join-Path $env:TEMP "obs-smoke-stderr.log"
+if (Test-Path $obsStdOutPath) {
+  Remove-Item $obsStdOutPath -Force
+}
+if (Test-Path $obsStdErrPath) {
+  Remove-Item $obsStdErrPath -Force
+}
+
 $beforeLogs = @()
 if (Test-Path $logDir) {
   $beforeLogs = @(Get-ChildItem $logDir -File -Filter "*.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
 }
 
-$obsProcess = Start-Process -FilePath $obsExe -PassThru
+$obsProcess = Start-Process -FilePath $obsExe -ArgumentList @("--verbose", "--unfiltered_log") -PassThru -RedirectStandardOutput $obsStdOutPath -RedirectStandardError $obsStdErrPath
 Start-Sleep -Seconds $ObsRunSeconds
 if (-not $obsProcess.HasExited) {
   Stop-Process -Id $obsProcess.Id -Force
@@ -87,11 +96,17 @@ if (-not $newestLog) {
   $newestLog = $afterLogs | Select-Object -First 1
 }
 
-if (-not $newestLog) {
-  throw "OBS did not produce a log file in $logDir"
+$logText = ""
+if ($newestLog) {
+  $logText += (Get-Content -Path $newestLog.FullName -Raw)
+}
+if (Test-Path $obsStdOutPath) {
+  $logText += "`n" + (Get-Content -Path $obsStdOutPath -Raw)
+}
+if (Test-Path $obsStdErrPath) {
+  $logText += "`n" + (Get-Content -Path $obsStdErrPath -Raw)
 }
 
-$logText = Get-Content -Path $newestLog.FullName -Raw
 $containsPluginDll = $logText -match "overlay_plugin\\.dll"
 $containsModuleName = $logText -match "soul-memory-obs-overlay|Soul Memory Overlay|soul_memory_overlay_source"
 $overlayLoadFailure = $logText -match "Failed to load module.*overlay_plugin\\.dll|Module .*overlay_plugin\\.dll.*not loaded|LoadLibrary failed.*overlay_plugin\\.dll"
@@ -104,7 +119,9 @@ $report = [ordered]@{
   obs_root_attempt_exit_code = $obsRootAttempt.ExitCode
   obs_root_rejected_in_standard_mode = $obsRootRejected
   post_standard_layout = $postStandardState
-  obs_log_path = $newestLog.FullName
+  obs_log_path = if ($newestLog) { $newestLog.FullName } else { $null }
+  obs_stdout_path = if (Test-Path $obsStdOutPath) { $obsStdOutPath } else { $null }
+  obs_stderr_path = if (Test-Path $obsStdErrPath) { $obsStdErrPath } else { $null }
   obs_log_markers = [ordered]@{
     contains_overlay_plugin_dll = $containsPluginDll
     contains_source_markers = $containsModuleName
@@ -124,7 +141,18 @@ if ($logCopyDir -and -not (Test-Path $logCopyDir)) {
 }
 
 $report | ConvertTo-Json -Depth 5 | Out-File -FilePath $ReportPath -Encoding utf8
-Copy-Item -Path $newestLog.FullName -Destination $LogCopyPath -Force
+if ($newestLog) {
+  Copy-Item -Path $newestLog.FullName -Destination $LogCopyPath -Force
+}
+elseif (Test-Path $obsStdOutPath) {
+  Copy-Item -Path $obsStdOutPath -Destination $LogCopyPath -Force
+}
+elseif (Test-Path $obsStdErrPath) {
+  Copy-Item -Path $obsStdErrPath -Destination $LogCopyPath -Force
+}
+else {
+  "No OBS log output captured" | Out-File -FilePath $LogCopyPath -Encoding utf8
+}
 
 $standardLayoutValid = $postStandardState.standard_plugin_dll -and $postStandardState.standard_helper_exe
 $portableNotWritten = (-not $postStandardState.portable_plugin_dll) -and (-not $postStandardState.portable_helper_exe)

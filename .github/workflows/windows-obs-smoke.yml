@@ -156,6 +156,7 @@ jobs:
           & "$env:GITHUB_WORKSPACE/scripts/run-obs-smoke.ps1" -InstallerPath $installerPath -ReportPath "$env:GITHUB_WORKSPACE/artifacts/obs-smoke-report.json" -LogCopyPath "$env:GITHUB_WORKSPACE/artifacts/obs-last-log.txt"
 
       - name: Upload smoke evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: obs-smoke-windows
