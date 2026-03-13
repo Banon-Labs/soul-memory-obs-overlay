@@ -85,7 +85,8 @@ if (Test-Path $logDir) {
   $beforeLogs = @(Get-ChildItem $logDir -File -Filter "*.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
 }
 
-$obsProcess = Start-Process -FilePath $obsExe -ArgumentList @("--verbose", "--unfiltered_log") -PassThru -RedirectStandardOutput $obsStdOutPath -RedirectStandardError $obsStdErrPath
+$obsWorkingDirectory = Split-Path -Parent $obsExe
+$obsProcess = Start-Process -FilePath $obsExe -WorkingDirectory $obsWorkingDirectory -ArgumentList @("--verbose", "--unfiltered_log") -PassThru -RedirectStandardOutput $obsStdOutPath -RedirectStandardError $obsStdErrPath
 Start-Sleep -Seconds $ObsRunSeconds
 if (-not $obsProcess.HasExited) {
   Stop-Process -Id $obsProcess.Id -Force
