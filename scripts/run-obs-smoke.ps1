@@ -129,7 +129,8 @@ if (Test-Path $obsStdErrPath) {
 $containsPluginDll = $logText -match "overlay_plugin\\.dll|soul-memory-obs-overlay\\.dll"
 $containsModuleName = $logText -match "soul-memory-obs-overlay|Soul Memory Overlay|soul_memory_overlay_source"
 $overlayLoadFailure = $logText -match "Failed to load module.*(overlay_plugin|soul-memory-obs-overlay)\\.dll|Module .*(overlay_plugin|soul-memory-obs-overlay)\\.dll.*not loaded|LoadLibrary failed.*(overlay_plugin|soul-memory-obs-overlay)\\.dll"
-$sourceVisibleInferred = ($containsPluginDll -or $containsModuleName) -and (-not $overlayLoadFailure)
+$overlayModuleDisabled = $logText -match "Skipping module 'overlay_plugin', is disabled|Skipping module 'soul-memory-obs-overlay', is disabled"
+$sourceVisibleInferred = ($containsPluginDll -or $containsModuleName) -and (-not $overlayLoadFailure) -and (-not $overlayModuleDisabled)
 
 $report = [ordered]@{
   installer_path = $installerFullPath.Path
@@ -146,6 +147,7 @@ $report = [ordered]@{
     contains_overlay_plugin_dll = $containsPluginDll
     contains_source_markers = $containsModuleName
     has_overlay_plugin_load_failure = $overlayLoadFailure
+    overlay_module_disabled = $overlayModuleDisabled
   }
   source_visibility_inferred = $sourceVisibleInferred
 }
@@ -187,6 +189,10 @@ if (-not $portableNotWritten) {
 
 if (-not $obsRootRejected) {
   throw "Standard mode OBS-root path attempt was not rejected. See $ReportPath"
+}
+
+if ($overlayModuleDisabled) {
+  throw "OBS reported overlay_plugin as disabled in plugin manager state. See $ReportPath and $LogCopyPath"
 }
 
 if (-not $sourceVisibleInferred) {
