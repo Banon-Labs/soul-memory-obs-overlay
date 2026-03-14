@@ -5,7 +5,7 @@ Soul Memory OBS Overlay is a Windows OBS plugin that shows your Dark Souls II: S
 ## One-Click Install (Windows)
 
 1. Download the latest installer: `SoulMemoryOverlay-<version>-setup.exe`.
-2. Close OBS.
+2. Close OBS (the installer now aborts if `obs64.exe` is running).
 3. Run the installer normally (not as Administrator).
 4. Open OBS and add source: `Sources -> + -> Soul Memory Overlay`.
 5. Launch Dark Souls II and load into a character.
@@ -19,6 +19,7 @@ The plugin auto-starts the helper process when the source is active.
   - **Portable/custom OBS** installs to OBS root layout (`obs-plugins/64bit` and `data/obs-plugins/...`).
 - Mode/path rule: OBS installation folders (`...\obs-studio` containing `bin\64bit\obs64.exe`) should use **Portable/custom** mode. Standard mode is for ProgramData plugin layout paths.
 - In Portable/custom mode, the installer validates that the selected folder contains `bin\64bit\obs64.exe`.
+- The installer aborts if OBS is running, so source-type registration is picked up cleanly on next launch.
 - If OBS auto-detection fails in Portable/custom mode, use **Browse** and select the correct OBS folder manually.
 - During Standard-mode upgrades, the installer removes this plugin's legacy OBS-root files from the detected OBS installation to prevent duplicate loads.
 

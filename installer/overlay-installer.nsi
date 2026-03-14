@@ -47,7 +47,29 @@ Page custom DirectoryPageCreate DirectoryPageLeave
 
 !insertmacro MUI_LANGUAGE "English"
 
+Function EnsureObsClosed
+  nsExec::ExecToStack 'cmd /C tasklist /FI "IMAGENAME eq obs64.exe" /NH | find /I "obs64.exe"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" obs_running done
+
+obs_running:
+  IfSilent silent_mode interactive_mode
+
+interactive_mode:
+  MessageBox MB_ICONSTOP|MB_OK "OBS Studio (obs64.exe) is currently running.$\r$\n$\r$\nClose OBS Studio and run this installer again so the Soul Memory source type appears after restart."
+  Abort
+
+silent_mode:
+  DetailPrint "OBS Studio (obs64.exe) is running; installation aborted."
+  SetErrorLevel 3
+  Abort
+
+done:
+FunctionEnd
+
 Function .onInit
+  Call EnsureObsClosed
   StrCpy $InstallMode "${INSTALL_MODE_STANDARD}"
   StrCpy $ObsPathDetected "0"
   StrCpy $DetectedObsDir ""

@@ -12,7 +12,7 @@ When Dark Souls II: Scholar of the First Sin is running, the source shows your S
 - You need Windows
 - You need OBS Studio installed
 - You need Dark Souls II: Scholar of the First Sin
-- Close OBS before installing
+- Close OBS before installing (the installer aborts while `obs64.exe` is running)
 
 ## Install (3 minutes)
 
