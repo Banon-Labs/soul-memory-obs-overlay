@@ -37,7 +37,10 @@ jobs:
       - name: Show runner selection
         shell: pwsh
         run: |
-          $selected = "${{ github.event_name == 'workflow_dispatch' && inputs.runner_labels_json || '[\"windows-latest\"]' }}"
+          $selected = @'
+          ${{ github.event_name == 'workflow_dispatch' && inputs.runner_labels_json || '["windows-latest"]' }}
+          '@
+          $selected = $selected.Trim()
           Write-Host "Selected runner labels: $selected"
           Write-Host "Runner name: $env:RUNNER_NAME"
           Write-Host "Runner OS/arch: $env:RUNNER_OS / $env:RUNNER_ARCH"
