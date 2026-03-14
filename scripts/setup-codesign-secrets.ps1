@@ -38,33 +38,52 @@ function Convert-SecureStringToPlain {
 function Show-Status {
   param([string]$TargetRepo)
 
-  $secretList = gh secret list -R $TargetRepo
-  $variableList = gh variable list -R $TargetRepo
+  $secretList = (gh secret list -R $TargetRepo | Out-String)
+  $variableList = (gh variable list -R $TargetRepo | Out-String)
 
-  if ($secretList -match '(?m)^WINDOWS_CODESIGN_PFX_BASE64\b') {
-    Write-Host "OK secret WINDOWS_CODESIGN_PFX_BASE64"
-  }
-  else {
-    Write-Host "MISSING secret WINDOWS_CODESIGN_PFX_BASE64"
+  function Show-NameStatus {
+    param(
+      [string]$Type,
+      [string]$Name,
+      [string]$Source
+    )
+
+    if ($Source -match "(?m)^$([regex]::Escape($Name))\b") {
+      Write-Host "OK $Type $Name"
+    }
+    else {
+      Write-Host "MISSING $Type $Name"
+    }
   }
 
-  if ($secretList -match '(?m)^WINDOWS_CODESIGN_PFX_PASSWORD\b') {
-    Write-Host "OK secret WINDOWS_CODESIGN_PFX_PASSWORD"
-  }
-  else {
-    Write-Host "MISSING secret WINDOWS_CODESIGN_PFX_PASSWORD"
-  }
+  Write-Host "Managed trusted signing (preferred):"
+  Show-NameStatus -Type "secret" -Name "AZURE_CLIENT_ID" -Source $secretList
+  Show-NameStatus -Type "secret" -Name "AZURE_TENANT_ID" -Source $secretList
+  Show-NameStatus -Type "secret" -Name "AZURE_SUBSCRIPTION_ID" -Source $secretList
+  Show-NameStatus -Type "variable" -Name "WINDOWS_TRUSTED_SIGNING_ENDPOINT" -Source $variableList
+  Show-NameStatus -Type "variable" -Name "WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME" -Source $variableList
+  Show-NameStatus -Type "variable" -Name "WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME" -Source $variableList
 
-  if ($variableList -match '(?m)^WINDOWS_CODESIGN_TIMESTAMP_URL\b') {
-    Write-Host "OK variable WINDOWS_CODESIGN_TIMESTAMP_URL"
-  }
-  else {
-    Write-Host "MISSING variable WINDOWS_CODESIGN_TIMESTAMP_URL"
-  }
+  Write-Host ""
+  Write-Host "PFX signing (fallback/testing):"
+  Show-NameStatus -Type "secret" -Name "WINDOWS_CODESIGN_PFX_BASE64" -Source $secretList
+  Show-NameStatus -Type "secret" -Name "WINDOWS_CODESIGN_PFX_PASSWORD" -Source $secretList
+  Show-NameStatus -Type "variable" -Name "WINDOWS_CODESIGN_TIMESTAMP_URL" -Source $variableList
 }
 
 function Test-IsWindowsPlatform {
   return $env:OS -eq "Windows_NT"
+}
+
+function Get-DefaultTestPfxPath {
+  if (Test-IsWindowsPlatform) {
+    $userProfile = $env:USERPROFILE
+    if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
+      return (Join-Path $userProfile ".codesign/soulmemory-test-signing.pfx")
+    }
+  }
+
+  return (Join-Path $env:TEMP "soulmemory-test-signing.pfx")
 }
 
 function New-TestPfx {
@@ -111,7 +130,7 @@ $passwordSecure = $null
 
 if ($CreateTestCert) {
   if ([string]::IsNullOrWhiteSpace($PfxPath)) {
-    $PfxPath = Join-Path $env:TEMP "soulmemory-test-signing.pfx"
+    $PfxPath = Get-DefaultTestPfxPath
   }
 
   $passwordSecure = Read-Host "Password for new test .pfx and CI secret" -AsSecureString

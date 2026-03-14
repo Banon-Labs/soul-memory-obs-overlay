@@ -17,6 +17,12 @@ Options:
   -h, --help              Show this help
 
 Secrets/variables configured:
+  AZURE_CLIENT_ID                     (secret, managed signing)
+  AZURE_TENANT_ID                     (secret, managed signing)
+  AZURE_SUBSCRIPTION_ID               (secret, managed signing)
+  WINDOWS_TRUSTED_SIGNING_ENDPOINT    (variable, managed signing)
+  WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME (variable, managed signing)
+  WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME (variable, managed signing)
   WINDOWS_CODESIGN_PFX_BASE64      (secret)
   WINDOWS_CODESIGN_PFX_PASSWORD    (secret)
   WINDOWS_CODESIGN_TIMESTAMP_URL   (variable)
@@ -74,23 +80,30 @@ show_status() {
   secret_list="$(gh secret list -R "$repo")"
   variable_list="$(gh variable list -R "$repo")"
 
-  if grep -q "^WINDOWS_CODESIGN_PFX_BASE64" <<<"$secret_list"; then
-    echo "OK secret WINDOWS_CODESIGN_PFX_BASE64"
-  else
-    echo "MISSING secret WINDOWS_CODESIGN_PFX_BASE64"
-  fi
+  check_name() {
+    local type="$1"
+    local name="$2"
+    local source="$3"
+    if grep -q "^${name}" <<<"$source"; then
+      echo "OK ${type} ${name}"
+    else
+      echo "MISSING ${type} ${name}"
+    fi
+  }
 
-  if grep -q "^WINDOWS_CODESIGN_PFX_PASSWORD" <<<"$secret_list"; then
-    echo "OK secret WINDOWS_CODESIGN_PFX_PASSWORD"
-  else
-    echo "MISSING secret WINDOWS_CODESIGN_PFX_PASSWORD"
-  fi
+  echo "Managed trusted signing (preferred):"
+  check_name "secret" "AZURE_CLIENT_ID" "$secret_list"
+  check_name "secret" "AZURE_TENANT_ID" "$secret_list"
+  check_name "secret" "AZURE_SUBSCRIPTION_ID" "$secret_list"
+  check_name "variable" "WINDOWS_TRUSTED_SIGNING_ENDPOINT" "$variable_list"
+  check_name "variable" "WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME" "$variable_list"
+  check_name "variable" "WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME" "$variable_list"
 
-  if grep -q "^WINDOWS_CODESIGN_TIMESTAMP_URL" <<<"$variable_list"; then
-    echo "OK variable WINDOWS_CODESIGN_TIMESTAMP_URL"
-  else
-    echo "MISSING variable WINDOWS_CODESIGN_TIMESTAMP_URL"
-  fi
+  echo ""
+  echo "PFX signing (fallback/testing):"
+  check_name "secret" "WINDOWS_CODESIGN_PFX_BASE64" "$secret_list"
+  check_name "secret" "WINDOWS_CODESIGN_PFX_PASSWORD" "$secret_list"
+  check_name "variable" "WINDOWS_CODESIGN_TIMESTAMP_URL" "$variable_list"
 }
 
 prompt_password() {

@@ -65,20 +65,26 @@ Migration behavior:
 
 ## CI Code Signing Setup (Maintainers)
 
-To configure GitHub Actions signing secrets/variables without putting passwords into files:
+To configure GitHub Actions signing for release builds:
 
-- WSL wrapper for PowerShell setup script (recommended for WSL users):
-  - `bash scripts/setup-codesign-secrets-wsl.sh -CreateTestCert -Repo "chozandrias76/soul-memory-obs-overlay"`
-- Bash (Linux/WSL, existing `.pfx`):
-  - `bash scripts/setup-codesign-secrets.sh --pfx "/path/to/codesign.pfx"`
-- PowerShell 7 (Windows, existing `.pfx`):
-  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -PfxPath "C:\path\to\codesign.pfx"`
-- PowerShell 7 (Windows, generate temporary self-signed test cert and configure secrets):
-  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -CreateTestCert`
+- Managed trusted signing (recommended for strict mode):
+  - Configure secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+  - Configure variables: `WINDOWS_TRUSTED_SIGNING_ENDPOINT`, `WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME`, `WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME`.
+  - The `windows-release` workflow auto-selects managed mode when all six values are present.
+- PFX signing (fallback/testing path):
+  - WSL wrapper for PowerShell setup script (recommended for WSL users):
+    - `bash scripts/setup-codesign-secrets-wsl.sh -CreateTestCert -Repo "Banon-Labs/soul-memory-obs-overlay"`
+  - Bash (Linux/WSL, existing `.pfx`):
+    - `bash scripts/setup-codesign-secrets.sh --pfx "/path/to/codesign.pfx"`
+  - PowerShell 7 (Windows, existing `.pfx`):
+    - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -PfxPath "C:\path\to\codesign.pfx"`
+  - PowerShell 7 (Windows, generate temporary self-signed test cert and configure secrets):
+    - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -CreateTestCert`
+    - When `-PfxPath` is omitted, the test cert is saved to `C:\Users\<username>\.codesign\soulmemory-test-signing.pfx`.
 
-Check whether required names exist:
+Check whether signing configuration names exist (managed + PFX):
 
-- `bash scripts/setup-codesign-secrets-wsl.sh -Check -Repo "chozandrias76/soul-memory-obs-overlay"`
+- `bash scripts/setup-codesign-secrets-wsl.sh -Check -Repo "Banon-Labs/soul-memory-obs-overlay"`
 - `bash scripts/setup-codesign-secrets.sh --check`
 - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -Check`
 
@@ -91,7 +97,9 @@ Local signing harness (fast validation without running full release workflow):
 
 Workflow dispatch note:
 
-- `windows-release` now defaults to **strict trusted-signing mode**. A self-signed cert will fail signing unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- `windows-release` now defaults to **strict trusted-signing mode**.
+- In strict mode, self-signed certs fail unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- Signing mode selection is automatic: managed trusted-signing is used when fully configured; otherwise the workflow falls back to PFX mode.
 - `windows-release` accepts `runner_labels_json` for selecting a Defender-capable runner profile (example: `["self-hosted","windows","x64","defender-enabled"]`).
 - Microsoft Defender scan entries with `scan_status: "skipped"` now fail the run.
 - The workflow also fails on `scan_status: "unscannable-environment"` (for example, hosted runners where Defender is disabled or full-drive exclusions prevent meaningful scans). Use a Defender-enabled Windows runner without broad root-drive exclusions for release validation.

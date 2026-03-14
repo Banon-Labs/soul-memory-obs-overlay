@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-windows:
@@ -285,14 +286,19 @@ jobs:
           }
           Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
 
-      - name: Sign and verify Windows binaries
-        timeout-minutes: 15
+      - name: Resolve signing configuration
+        id: signing_config
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
           WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
-          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
           WINDOWS_CODESIGN_ALLOW_SELF_SIGNED: ${{ vars.WINDOWS_CODESIGN_ALLOW_SELF_SIGNED }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          WINDOWS_TRUSTED_SIGNING_ENDPOINT: ${{ vars.WINDOWS_TRUSTED_SIGNING_ENDPOINT }}
+          WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME: ${{ vars.WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME }}
         run: |
           $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
           $allowSelfSigned = -not $releaseContext
@@ -302,6 +308,98 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
             $allowSelfSigned = $env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED -eq "true"
           }
+
+          $managedValues = [ordered]@{
+            AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
+            AZURE_TENANT_ID = $env:AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID = $env:AZURE_SUBSCRIPTION_ID
+            WINDOWS_TRUSTED_SIGNING_ENDPOINT = $env:WINDOWS_TRUSTED_SIGNING_ENDPOINT
+            WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME = $env:WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME
+            WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME = $env:WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME
+          }
+
+          $configuredManagedKeys = @(
+            $managedValues.GetEnumerator() |
+              Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Value) } |
+              ForEach-Object { $_.Key }
+          )
+          $requiredManagedKeys = @($managedValues.Keys)
+          $hasManaged = $configuredManagedKeys.Count -eq $requiredManagedKeys.Count
+          $hasAnyManaged = $configuredManagedKeys.Count -gt 0
+
+          if ($hasAnyManaged -and -not $hasManaged) {
+            $missingManaged = @($requiredManagedKeys | Where-Object { $configuredManagedKeys -notcontains $_ })
+            throw "Managed trusted-signing configuration is incomplete. Missing: $($missingManaged -join ', ')"
+          }
+
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
+          if (-not $hasManaged -and -not $hasPfx) {
+            throw "No signing configuration found. Configure managed trusted-signing settings or PFX signing secrets."
+          }
+
+          $signingMode = if ($hasManaged) { "managed" } else { "pfx" }
+
+          Write-Host "Signing mode: $signingMode"
+          Write-Host "Release context: $releaseContext"
+          Write-Host "Self-signed allowance enabled: $allowSelfSigned"
+
+          "signing_mode=$signingMode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_context=$($releaseContext.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "allow_self_signed=$($allowSelfSigned.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Azure login (managed trusted-signing)
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign binaries with Azure Artifact Signing
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.WINDOWS_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME }}
+          files: |
+            release-assets/overlay_plugin.dll
+            release-assets/overlay-helper.exe
+            release-assets/SoulMemoryOverlay-setup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+          timestamp-digest: SHA256
+
+      - name: Verify signed Windows binaries (managed mode)
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $releaseContext = "${{ steps.signing_config.outputs.release_context }}" -eq "true"
+          $allowSelfSigned = "${{ steps.signing_config.outputs.allow_self_signed }}" -eq "true"
+
+          ./scripts/sign-windows-artifacts.ps1 `
+            -Files @(
+              "release-assets/overlay_plugin.dll",
+              "release-assets/overlay-helper.exe",
+              "release-assets/SoulMemoryOverlay-setup.exe"
+            ) `
+            -ReportPath "release-assets/signing-report.json" `
+            -ReleaseContext:$releaseContext `
+            -AllowSelfSignedUntrusted:$allowSelfSigned `
+            -SkipSigning
+
+      - name: Sign and verify Windows binaries (PFX mode)
+        if: steps.signing_config.outputs.signing_mode == 'pfx'
+        timeout-minutes: 15
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: |
+          $releaseContext = "${{ steps.signing_config.outputs.release_context }}" -eq "true"
+          $allowSelfSigned = "${{ steps.signing_config.outputs.allow_self_signed }}" -eq "true"
 
           Write-Host "Self-signed allowance enabled: $allowSelfSigned"
 
