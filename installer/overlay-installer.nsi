@@ -79,8 +79,20 @@ Function .onInit
   Call DetectObsInstallDir
 
   StrCmp $ObsPathDetected "1" 0 on_init_done
-  StrCmp $DetectedObsDir "$PROGRAMFILES64\obs-studio" on_init_done 0
-  StrCmp $DetectedObsDir "$PROGRAMFILES\obs-studio" on_init_done 0
+  StrCpy $0 $DetectedObsDir
+  StrLen $1 $0
+  IntCmp $1 0 use_portable_default use_portable_default check_trailing_separator
+
+check_trailing_separator:
+  StrCpy $2 $0 1 -1
+  StrCmp $2 "\" 0 compare_known_paths
+    StrCpy $0 $0 -1
+
+compare_known_paths:
+  StrCmp $0 "$PROGRAMFILES64\obs-studio" on_init_done 0
+  StrCmp $0 "$PROGRAMFILES\obs-studio" on_init_done 0
+
+use_portable_default:
   StrCpy $InstallMode "${INSTALL_MODE_PORTABLE}"
   StrCmp $DetectedObsDir "" on_init_done 0
     StrCpy $INSTDIR "$DetectedObsDir"
