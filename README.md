@@ -21,6 +21,7 @@ The plugin auto-starts the helper process when the source is active.
 - In Portable/custom mode, the installer validates that the selected folder contains `bin\64bit\obs64.exe`.
 - If OBS is detected outside the default Program Files path (for example `D:\Obs`), the installer defaults to **Portable/custom OBS** automatically.
 - The installer aborts if OBS is running, so source-type registration is picked up cleanly on next launch.
+- The installer also attempts to re-enable this plugin in `%AppData%\obs-studio\plugin_manager\modules.json` if OBS previously marked `overlay_plugin` as disabled.
 - If OBS auto-detection fails in Portable/custom mode, use **Browse** and select the correct OBS folder manually.
 - During Standard-mode upgrades, the installer removes this plugin's legacy OBS-root files from the detected OBS installation to prevent duplicate loads.
 
@@ -62,6 +63,7 @@ Migration behavior:
     - Standard mode: `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll`
     - Portable/custom mode: `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
   - Check `%AppData%\obs-studio\logs\` (or `Help -> Log Files -> View Current Log`) for `soul-memory-obs-overlay.dll`, `overlay_plugin.dll`, `soul-memory-obs-overlay`, or `Failed to load module` lines.
+  - If log shows `Skipping module 'overlay_plugin', is disabled`, open `%AppData%\obs-studio\plugin_manager\modules.json`, find `"module_name": "overlay_plugin"`, and set `"enabled": true`, then restart OBS.
 - **Installer cannot find OBS automatically in Portable/custom mode**
   - Click **Browse** and select the folder that contains `bin\64bit\obs64.exe`.
 

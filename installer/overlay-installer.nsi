@@ -483,6 +483,15 @@ install_portable:
   WriteUninstaller "$INSTDIR\obs-overlay-uninstall.exe"
 
 install_done:
+  SetOutPath "$TEMP"
+  File /oname=obs-overlay-enable-module.ps1 "${PROJECT_ROOT}\installer\enable-overlay-module.ps1"
+  nsExec::ExecToStack 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$TEMP\obs-overlay-enable-module.ps1"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" +2 0
+    DetailPrint "OBS module state update warning (exit $0): $1"
+  Delete "$TEMP\obs-overlay-enable-module.ps1"
+
 SectionEnd
 
 Function un.DetectObsInstallDir
