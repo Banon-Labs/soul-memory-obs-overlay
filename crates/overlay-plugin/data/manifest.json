@@ -2,6 +2,6 @@
   "module_name": "Soul Memory OBS Overlay",
   "module_author": "soul-memory-obs-overlay",
   "source_id": "soul_memory_overlay_source",
-  "source_name": "Soul Memory",
+  "source_name": "Soul Memory Overlay",
   "data_folder": "soul-memory-obs-overlay"
 }

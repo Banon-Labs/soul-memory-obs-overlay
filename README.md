@@ -5,7 +5,7 @@ Soul Memory OBS Overlay is a Windows OBS plugin that shows your Dark Souls II: S
 ## One-Click Install (Windows)
 
 1. Download the latest installer: `SoulMemoryOverlay-<version>-setup.exe`.
-2. Close OBS.
+2. Close OBS (the installer now aborts if `obs64.exe` is running).
 3. Run the installer normally (not as Administrator).
 4. Open OBS and add source: `Sources -> + -> Soul Memory Overlay`.
 5. Launch Dark Souls II and load into a character.
@@ -17,7 +17,11 @@ The plugin auto-starts the helper process when the source is active.
 - The installer now has two explicit modes:
   - **Standard (recommended)** installs to `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay`.
   - **Portable/custom OBS** installs to OBS root layout (`obs-plugins/64bit` and `data/obs-plugins/...`).
+- Mode/path rule: OBS installation folders (`...\obs-studio` containing `bin\64bit\obs64.exe`) should use **Portable/custom** mode. Standard mode is for ProgramData plugin layout paths.
 - In Portable/custom mode, the installer validates that the selected folder contains `bin\64bit\obs64.exe`.
+- If OBS is detected outside the default Program Files path (for example `D:\Obs`), the installer defaults to **Portable/custom OBS** automatically.
+- The installer aborts if OBS is running, so source-type registration is picked up cleanly on next launch.
+- The installer also attempts to re-enable this plugin in `%AppData%\obs-studio\plugin_manager\modules.json` if OBS previously marked `overlay_plugin` as disabled.
 - If OBS auto-detection fails in Portable/custom mode, use **Browse** and select the correct OBS folder manually.
 - During Standard-mode upgrades, the installer removes this plugin's legacy OBS-root files from the detected OBS installation to prevent duplicate loads.
 
@@ -32,7 +36,7 @@ Use either method:
 
 Uninstall removes:
 
-- Standard mode: `bin/64bit/overlay_plugin.dll`, `bin/64bit/overlay-helper.exe`, `data/config/overlay.toml`, `data/locale/en-US.ini`
+- Standard mode: `bin/64bit/soul-memory-obs-overlay.dll`, `bin/64bit/overlay-helper.exe`, `data/config/overlay.toml`, `data/locale/en-US.ini`
 - Portable/custom mode: `obs-plugins/64bit/overlay_plugin.dll`, `obs-plugins/64bit/overlay-helper.exe`, `data/obs-plugins/soul-memory-obs-overlay/*`
 
 Migration behavior:
@@ -55,26 +59,36 @@ Migration behavior:
   - Verify anti-cheat or security software is not blocking memory access.
 - **Source not visible in OBS source list**
   - Restart OBS after install.
-  - Confirm `overlay_plugin.dll` exists in OBS `obs-plugins/64bit`.
+  - Confirm plugin files exist in the selected install target:
+    - Standard mode: `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll`
+    - Portable/custom mode: `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
+  - Check `%AppData%\obs-studio\logs\` (or `Help -> Log Files -> View Current Log`) for `soul-memory-obs-overlay.dll`, `overlay_plugin.dll`, `soul-memory-obs-overlay`, or `Failed to load module` lines.
+  - If log shows `Skipping module 'overlay_plugin', is disabled`, open `%AppData%\obs-studio\plugin_manager\modules.json`, find `"module_name": "overlay_plugin"`, and set `"enabled": true`, then restart OBS.
 - **Installer cannot find OBS automatically in Portable/custom mode**
   - Click **Browse** and select the folder that contains `bin\64bit\obs64.exe`.
 
 ## CI Code Signing Setup (Maintainers)
 
-To configure GitHub Actions signing secrets/variables without putting passwords into files:
+To configure GitHub Actions signing for release builds:
 
-- WSL wrapper for PowerShell setup script (recommended for WSL users):
-  - `bash scripts/setup-codesign-secrets-wsl.sh -CreateTestCert -Repo "chozandrias76/soul-memory-obs-overlay"`
-- Bash (Linux/WSL, existing `.pfx`):
-  - `bash scripts/setup-codesign-secrets.sh --pfx "/path/to/codesign.pfx"`
-- PowerShell 7 (Windows, existing `.pfx`):
-  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -PfxPath "C:\path\to\codesign.pfx"`
-- PowerShell 7 (Windows, generate temporary self-signed test cert and configure secrets):
-  - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -CreateTestCert`
+- Managed trusted signing (recommended for strict mode):
+  - Configure secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+  - Configure variables: `WINDOWS_TRUSTED_SIGNING_ENDPOINT`, `WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME`, `WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME`.
+  - The `windows-release` workflow auto-selects managed mode when all six values are present.
+- PFX signing (fallback/testing path):
+  - WSL wrapper for PowerShell setup script (recommended for WSL users):
+    - `bash scripts/setup-codesign-secrets-wsl.sh -CreateTestCert -Repo "Banon-Labs/soul-memory-obs-overlay"`
+  - Bash (Linux/WSL, existing `.pfx`):
+    - `bash scripts/setup-codesign-secrets.sh --pfx "/path/to/codesign.pfx"`
+  - PowerShell 7 (Windows, existing `.pfx`):
+    - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -PfxPath "C:\path\to\codesign.pfx"`
+  - PowerShell 7 (Windows, generate temporary self-signed test cert and configure secrets):
+    - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -CreateTestCert`
+    - When `-PfxPath` is omitted, the test cert is saved to `C:\Users\<username>\.codesign\soulmemory-test-signing.pfx`.
 
-Check whether required names exist:
+Check whether signing configuration names exist (managed + PFX):
 
-- `bash scripts/setup-codesign-secrets-wsl.sh -Check -Repo "chozandrias76/soul-memory-obs-overlay"`
+- `bash scripts/setup-codesign-secrets-wsl.sh -Check -Repo "Banon-Labs/soul-memory-obs-overlay"`
 - `bash scripts/setup-codesign-secrets.sh --check`
 - `pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/setup-codesign-secrets.ps1 -Check`
 
@@ -87,8 +101,12 @@ Local signing harness (fast validation without running full release workflow):
 
 Workflow dispatch note:
 
-- `windows-release` now defaults to **strict trusted-signing mode**. A self-signed cert will fail signing unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- `windows-release` now defaults to **strict trusted-signing mode**.
+- In strict mode, self-signed certs fail unless you explicitly set workflow input `allow_self_signed=true` (testing only).
+- Signing mode selection is automatic: managed trusted-signing is used when fully configured; otherwise the workflow falls back to PFX mode.
+- `windows-release` accepts `runner_labels_json` for selecting a Defender-capable runner profile (example: `["self-hosted","windows","x64","defender-enabled"]`).
 - Microsoft Defender scan entries with `scan_status: "skipped"` now fail the run.
+- The workflow also fails on `scan_status: "unscannable-environment"` (for example, hosted runners where Defender is disabled or full-drive exclusions prevent meaningful scans). Use a Defender-enabled Windows runner without broad root-drive exclusions for release validation.
 
 ## License
 

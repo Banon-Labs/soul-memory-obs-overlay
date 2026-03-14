@@ -12,7 +12,7 @@ When Dark Souls II: Scholar of the First Sin is running, the source shows your S
 - You need Windows
 - You need OBS Studio installed
 - You need Dark Souls II: Scholar of the First Sin
-- Close OBS before installing
+- Close OBS before installing (the installer aborts while `obs64.exe` is running)
 
 ## Install (3 minutes)
 
@@ -21,6 +21,9 @@ When Dark Souls II: Scholar of the First Sin is running, the source shows your S
 3. Finish the installer
    - Choose **Standard (recommended)** to install to `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay`.
    - Choose **Portable/custom OBS** only when needed, then select the OBS folder that contains `bin\64bit\obs64.exe`.
+   - If OBS is found in a custom path (for example `D:\Obs`), the installer defaults to **Portable/custom OBS** automatically.
+   - The installer auto-re-enables `overlay_plugin` if OBS previously disabled it in plugin manager state.
+   - If you point at an OBS install folder, use **Portable/custom OBS**. Do not use Standard mode for an OBS root path.
    - In Portable/custom mode, the installer will not continue until a valid OBS folder is selected.
 4. Open OBS Studio
 5. In **Sources**, click **+**
@@ -42,6 +45,29 @@ Try these in order:
 2. Remove and re-add the source in OBS
 3. Restart OBS
 4. Make sure antivirus is not blocking the overlay files
+
+## If Source Type Is Missing
+
+If you do not see **Soul Memory Overlay** in OBS after relaunch:
+
+1. Confirm files exist for your selected mode:
+   - Standard mode:
+     - `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\soul-memory-obs-overlay.dll`
+     - `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay\bin\64bit\overlay-helper.exe`
+   - Portable/custom mode:
+     - `<OBS folder>\obs-plugins\64bit\overlay_plugin.dll`
+     - `<OBS folder>\obs-plugins\64bit\overlay-helper.exe`
+2. In OBS, open `Help -> Log Files -> View Current Log`.
+3. In `%AppData%\obs-studio\logs\`, inspect the newest log for:
+   - `soul-memory-obs-overlay.dll`
+   - `overlay_plugin.dll`
+   - `soul-memory-obs-overlay`
+   - `Failed to load module`
+4. If the log contains `Skipping module 'overlay_plugin', is disabled`:
+   - Open `%AppData%\obs-studio\plugin_manager\modules.json`
+   - Find the object with `"module_name": "overlay_plugin"`
+   - Set `"enabled": true`
+   - Restart OBS
 
 ## Update Later
 

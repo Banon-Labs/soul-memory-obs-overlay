@@ -1,0 +1,204 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$InstallerPath,
+
+  [string]$ObsRoot = "C:\Program Files\obs-studio",
+  [string]$ReportPath = "artifacts/obs-smoke-report.json",
+  [string]$LogCopyPath = "artifacts/obs-last-log.txt",
+  [int]$ObsRunSeconds = 20
+)
+
+$ErrorActionPreference = "Stop"
+
+function Get-PluginLayoutState {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$StandardBase,
+    [Parameter(Mandatory = $true)]
+    [string]$ObsRootDir
+  )
+
+  $standardPluginPath = Join-Path $StandardBase "bin/64bit/soul-memory-obs-overlay.dll"
+  $legacyStandardPluginPath = Join-Path $StandardBase "bin/64bit/overlay_plugin.dll"
+  $portablePluginPath = Join-Path $ObsRootDir "obs-plugins/64bit/overlay_plugin.dll"
+
+  $standardPluginPresent = (Test-Path $standardPluginPath) -or (Test-Path $legacyStandardPluginPath)
+  $standardPluginName = $null
+  if (Test-Path $standardPluginPath) {
+    $standardPluginName = "soul-memory-obs-overlay.dll"
+  }
+  elseif (Test-Path $legacyStandardPluginPath) {
+    $standardPluginName = "overlay_plugin.dll"
+  }
+
+  $state = [ordered]@{
+    standard_plugin_dll = $standardPluginPresent
+    standard_plugin_dll_name = $standardPluginName
+    standard_helper_exe = Test-Path (Join-Path $StandardBase "bin/64bit/overlay-helper.exe")
+    portable_plugin_dll = Test-Path $portablePluginPath
+    portable_helper_exe = Test-Path (Join-Path $ObsRootDir "obs-plugins/64bit/overlay-helper.exe")
+  }
+
+  return [pscustomobject]$state
+}
+
+function Remove-PathIfExists {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (Test-Path $Path) {
+    Remove-Item $Path -Force
+  }
+}
+
+$installerFullPath = Resolve-Path $InstallerPath -ErrorAction Stop
+$obsExe = Join-Path $ObsRoot "bin/64bit/obs64.exe"
+if (-not (Test-Path $obsExe)) {
+  throw "OBS executable not found: $obsExe"
+}
+
+$programData = $env:ProgramData
+if ([string]::IsNullOrWhiteSpace($programData)) {
+  $programData = "C:\ProgramData"
+}
+
+$standardBase = Join-Path $programData "obs-studio/plugins/soul-memory-obs-overlay"
+
+Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/soul-memory-obs-overlay.dll")
+Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/overlay_plugin.dll")
+Remove-PathIfExists -Path (Join-Path $standardBase "bin/64bit/overlay-helper.exe")
+Remove-PathIfExists -Path (Join-Path $ObsRoot "obs-plugins/64bit/overlay_plugin.dll")
+Remove-PathIfExists -Path (Join-Path $ObsRoot "obs-plugins/64bit/overlay-helper.exe")
+
+$standardInstall = Start-Process -FilePath $installerFullPath.Path -ArgumentList @("/S", "/D=$standardBase") -PassThru -Wait
+$postStandardState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
+
+$beforeObsRootAttemptState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
+$obsRootAttempt = Start-Process -FilePath $installerFullPath.Path -ArgumentList @("/S", "/D=$ObsRoot") -PassThru -Wait
+$afterObsRootAttemptState = Get-PluginLayoutState -StandardBase $standardBase -ObsRootDir $ObsRoot
+$obsRootAttemptWrotePortable = $afterObsRootAttemptState.portable_plugin_dll -or $afterObsRootAttemptState.portable_helper_exe
+$obsRootRejected = ($obsRootAttempt.ExitCode -ne 0) -or (-not $obsRootAttemptWrotePortable)
+
+$logDir = Join-Path $env:APPDATA "obs-studio/logs"
+if (-not (Test-Path $logDir)) {
+  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+$obsStdOutPath = Join-Path $env:TEMP "obs-smoke-stdout.log"
+$obsStdErrPath = Join-Path $env:TEMP "obs-smoke-stderr.log"
+if (Test-Path $obsStdOutPath) {
+  Remove-Item $obsStdOutPath -Force
+}
+if (Test-Path $obsStdErrPath) {
+  Remove-Item $obsStdErrPath -Force
+}
+
+$beforeLogs = @()
+if (Test-Path $logDir) {
+  $beforeLogs = @(Get-ChildItem $logDir -File -Filter "*.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+}
+
+$obsWorkingDirectory = Split-Path -Parent $obsExe
+$obsProcess = Start-Process -FilePath $obsExe -WorkingDirectory $obsWorkingDirectory -ArgumentList @("--verbose", "--unfiltered_log") -PassThru -RedirectStandardOutput $obsStdOutPath -RedirectStandardError $obsStdErrPath
+Start-Sleep -Seconds $ObsRunSeconds
+if (-not $obsProcess.HasExited) {
+  Stop-Process -Id $obsProcess.Id -Force
+}
+
+Start-Sleep -Seconds 2
+
+$afterLogs = @(Get-ChildItem $logDir -File -Filter "*.txt" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+$newestLog = $afterLogs | Where-Object { $beforeLogs -notcontains $_.FullName } | Select-Object -First 1
+if (-not $newestLog) {
+  $newestLog = $afterLogs | Select-Object -First 1
+}
+
+$logText = ""
+if ($newestLog) {
+  $logText += (Get-Content -Path $newestLog.FullName -Raw)
+}
+if (Test-Path $obsStdOutPath) {
+  $logText += "`n" + (Get-Content -Path $obsStdOutPath -Raw)
+}
+if (Test-Path $obsStdErrPath) {
+  $logText += "`n" + (Get-Content -Path $obsStdErrPath -Raw)
+}
+
+$containsPluginDll = $logText -match "overlay_plugin\\.dll|soul-memory-obs-overlay\\.dll"
+$containsModuleName = $logText -match "soul-memory-obs-overlay|Soul Memory Overlay|soul_memory_overlay_source"
+$overlayLoadFailure = $logText -match "Failed to load module.*(overlay_plugin|soul-memory-obs-overlay)\\.dll|Module .*(overlay_plugin|soul-memory-obs-overlay)\\.dll.*not loaded|LoadLibrary failed.*(overlay_plugin|soul-memory-obs-overlay)\\.dll"
+$overlayModuleDisabled = $logText -match "Skipping module 'overlay_plugin', is disabled|Skipping module 'soul-memory-obs-overlay', is disabled"
+$sourceVisibleInferred = ($containsPluginDll -or $containsModuleName) -and (-not $overlayLoadFailure) -and (-not $overlayModuleDisabled)
+
+$report = [ordered]@{
+  installer_path = $installerFullPath.Path
+  obs_root = $ObsRoot
+  standard_install_exit_code = $standardInstall.ExitCode
+  obs_root_attempt_exit_code = $obsRootAttempt.ExitCode
+  obs_root_attempt_wrote_portable_layout = $obsRootAttemptWrotePortable
+  obs_root_rejected_in_standard_mode = $obsRootRejected
+  post_standard_layout = $postStandardState
+  obs_log_path = if ($newestLog) { $newestLog.FullName } else { $null }
+  obs_stdout_path = if (Test-Path $obsStdOutPath) { $obsStdOutPath } else { $null }
+  obs_stderr_path = if (Test-Path $obsStdErrPath) { $obsStdErrPath } else { $null }
+  obs_log_markers = [ordered]@{
+    contains_overlay_plugin_dll = $containsPluginDll
+    contains_source_markers = $containsModuleName
+    has_overlay_plugin_load_failure = $overlayLoadFailure
+    overlay_module_disabled = $overlayModuleDisabled
+  }
+  source_visibility_inferred = $sourceVisibleInferred
+}
+
+$reportDir = Split-Path -Parent $ReportPath
+if ($reportDir -and -not (Test-Path $reportDir)) {
+  New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+}
+
+$logCopyDir = Split-Path -Parent $LogCopyPath
+if ($logCopyDir -and -not (Test-Path $logCopyDir)) {
+  New-Item -ItemType Directory -Path $logCopyDir -Force | Out-Null
+}
+
+$report | ConvertTo-Json -Depth 5 | Out-File -FilePath $ReportPath -Encoding utf8
+if ($newestLog) {
+  Copy-Item -Path $newestLog.FullName -Destination $LogCopyPath -Force
+}
+elseif (Test-Path $obsStdOutPath) {
+  Copy-Item -Path $obsStdOutPath -Destination $LogCopyPath -Force
+}
+elseif (Test-Path $obsStdErrPath) {
+  Copy-Item -Path $obsStdErrPath -Destination $LogCopyPath -Force
+}
+else {
+  "No OBS log output captured" | Out-File -FilePath $LogCopyPath -Encoding utf8
+}
+
+$standardLayoutValid = $postStandardState.standard_plugin_dll -and $postStandardState.standard_helper_exe
+$portableNotWritten = (-not $postStandardState.portable_plugin_dll) -and (-not $postStandardState.portable_helper_exe)
+
+if (-not $standardLayoutValid) {
+  throw "Standard mode install did not place plugin/helper files in ProgramData layout. See $ReportPath"
+}
+
+if (-not $portableNotWritten) {
+  throw "Standard mode install unexpectedly wrote portable layout files under OBS root. See $ReportPath"
+}
+
+if (-not $obsRootRejected) {
+  throw "Standard mode OBS-root path attempt was not rejected. See $ReportPath"
+}
+
+if ($overlayModuleDisabled) {
+  throw "OBS reported overlay_plugin as disabled in plugin manager state. See $ReportPath and $LogCopyPath"
+}
+
+if (-not $sourceVisibleInferred) {
+  throw "Could not infer source registration visibility from OBS log markers. See $ReportPath and $LogCopyPath"
+}
+
+Write-Host "OBS smoke verification passed"
+Write-Host "Report: $ReportPath"
+Write-Host "Log copy: $LogCopyPath"

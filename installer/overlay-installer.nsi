@@ -9,7 +9,8 @@
 
 !define APP_NAME "Soul Memory OBS Overlay"
 !define COMPANY_NAME "soul-memory-obs-overlay"
-!define DLL_NAME "overlay_plugin.dll"
+!define STANDARD_DLL_NAME "soul-memory-obs-overlay.dll"
+!define PORTABLE_DLL_NAME "overlay_plugin.dll"
 !define HELPER_EXE "overlay-helper.exe"
 !define PRODUCT_VERSION "0.1.3"
 !define OBS_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OBS Studio_is1"
@@ -20,37 +21,84 @@ Var ObsPathDetected
 Var DetectedObsDir
 Var ProgramDataDir
 Var InstallMode
-Var PortableDetectNoticeShown
 Var ModePageDialog
 Var ModeStandardRadio
 Var ModePortableRadio
+Var DirectoryPageDialog
+Var DirectoryPathInput
+Var DirectoryBrowseButton
+Var DirectoryGuideLabel
+Var DirectoryStatusLabel
+Var DirectoryStatusUpdateGuard
+
+!define STATUS_COLOR_INVALID 0x0000FF
+!define STATUS_COLOR_VALID 0x00AA00
 
 Name "${APP_NAME} ${PRODUCT_VERSION}"
 OutFile "SoulMemoryOverlay-${PRODUCT_VERSION}-setup.exe"
 InstallDir "$PROGRAMFILES64\obs-studio"
 RequestExecutionLevel admin
 
-!define MUI_DIRECTORYPAGE_TEXT_TOP "Choose installation folder."
-!define MUI_DIRECTORYPAGE_TEXT_DESTINATION "Installation folder"
-
 Page custom InstallModePageCreate InstallModePageLeave
-!define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPagePre
-!insertmacro MUI_PAGE_DIRECTORY
+Page custom DirectoryPageCreate DirectoryPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
 
+Function EnsureObsClosed
+  nsExec::ExecToStack 'cmd /C tasklist /FI "IMAGENAME eq obs64.exe" /NH | find /I "obs64.exe"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" obs_running done
+
+obs_running:
+  IfSilent silent_mode interactive_mode
+
+interactive_mode:
+  MessageBox MB_ICONSTOP|MB_OK "OBS Studio (obs64.exe) is currently running.$\r$\n$\r$\nClose OBS Studio and run this installer again so the Soul Memory source type appears after restart."
+  Abort
+
+silent_mode:
+  DetailPrint "OBS Studio (obs64.exe) is running; installation aborted."
+  SetErrorLevel 3
+  Abort
+
+done:
+FunctionEnd
+
 Function .onInit
+  Call EnsureObsClosed
   StrCpy $InstallMode "${INSTALL_MODE_STANDARD}"
   StrCpy $ObsPathDetected "0"
   StrCpy $DetectedObsDir ""
   ExpandEnvStrings $ProgramDataDir "%ProgramData%"
   StrCmp $ProgramDataDir "" 0 +2
     StrCpy $ProgramDataDir "C:\ProgramData"
-  StrCpy $PortableDetectNoticeShown "0"
   Call DetectObsInstallDir
+  IfSilent on_init_done 0
+
+  StrCmp $ObsPathDetected "1" 0 on_init_done
+  StrCpy $0 $DetectedObsDir
+  StrLen $1 $0
+  IntCmp $1 0 use_portable_default use_portable_default check_trailing_separator
+
+check_trailing_separator:
+  StrCpy $2 $0 1 -1
+  StrCmp $2 "\" 0 compare_known_paths
+    StrCpy $0 $0 -1
+
+compare_known_paths:
+  StrCmp $0 "$PROGRAMFILES64\obs-studio" on_init_done 0
+  StrCmp $0 "$PROGRAMFILES\obs-studio" on_init_done 0
+
+use_portable_default:
+  StrCpy $InstallMode "${INSTALL_MODE_PORTABLE}"
+  StrCmp $DetectedObsDir "" on_init_done 0
+    StrCpy $INSTDIR "$DetectedObsDir"
+
+on_init_done:
 FunctionEnd
 
 Function InstallModePageCreate
@@ -88,6 +136,180 @@ Function InstallModePageLeave
   StrCpy $InstallMode "${INSTALL_MODE_STANDARD}"
 FunctionEnd
 
+Function NormalizePortableInstallDir
+  IfFileExists "$INSTDIR\bin\64bit\obs64.exe" valid 0
+  IfFileExists "$INSTDIR\obs64.exe" 0 invalid
+  ${GetParent} "$INSTDIR" $1
+  ${GetParent} "$1" $2
+  IfFileExists "$2\bin\64bit\obs64.exe" 0 invalid
+  StrCpy $INSTDIR "$2"
+  Goto valid
+
+invalid:
+  StrCpy $0 "0"
+  Return
+
+valid:
+  StrCpy $0 "1"
+FunctionEnd
+
+Function DetectObsRootLikePath
+  IfFileExists "$INSTDIR\bin\64bit\obs64.exe" found 0
+  IfFileExists "$INSTDIR\obs64.exe" 0 not_found
+  ${GetParent} "$INSTDIR" $1
+  ${GetParent} "$1" $2
+  IfFileExists "$2\bin\64bit\obs64.exe" 0 not_found
+
+found:
+  StrCpy $0 "1"
+  Return
+
+not_found:
+  StrCpy $0 "0"
+FunctionEnd
+
+Function UpdateDirectoryStatus
+  StrCmp $DirectoryStatusUpdateGuard "1" already_updating
+  StrCpy $DirectoryStatusUpdateGuard "1"
+
+  ${NSD_GetText} $DirectoryPathInput $INSTDIR
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_status standard_status
+
+standard_status:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" standard_obs_root standard_path_check
+
+standard_obs_root:
+  ${NSD_SetText} $DirectoryStatusLabel "This looks like an OBS folder. Use Portable/custom mode for OBS install directories."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Goto done
+
+standard_path_check:
+  StrLen $0 $INSTDIR
+  IntCmp $0 3 standard_invalid standard_invalid standard_valid
+
+standard_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select a plugin folder path to continue."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Goto done
+
+standard_valid:
+  ${NSD_SetText} $DirectoryStatusLabel "Standard mode target looks valid (plugin files go to this folder's bin\\64bit and data subfolders)."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
+  Goto done
+
+portable_status:
+  Call NormalizePortableInstallDir
+  StrCmp $0 "1" portable_valid portable_invalid
+
+portable_valid:
+  ${NSD_SetText} $DirectoryStatusLabel "Valid OBS folder detected."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_VALID} transparent
+  ${NSD_GetText} $DirectoryPathInput $1
+  StrCmp $1 $INSTDIR done 0
+  ${NSD_SetText} $DirectoryPathInput $INSTDIR
+  Goto done
+
+portable_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select the OBS folder that contains bin\\64bit\\obs64.exe."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+
+done:
+  StrCpy $DirectoryStatusUpdateGuard "0"
+  Return
+
+already_updating:
+FunctionEnd
+
+Function OnDirectoryPathChange
+  Pop $0
+  Call UpdateDirectoryStatus
+FunctionEnd
+
+Function OnDirectoryBrowse
+  Pop $0
+  ${NSD_GetText} $DirectoryPathInput $0
+  nsDialogs::SelectFolderDialog "Select installation folder" $0
+  Pop $1
+  StrCmp $1 "error" done 0
+  ${NSD_SetText} $DirectoryPathInput $1
+
+done:
+  Call UpdateDirectoryStatus
+FunctionEnd
+
+Function DirectoryPageCreate
+  Call DirectoryPagePre
+  StrCpy $DirectoryStatusUpdateGuard "0"
+
+  nsDialogs::Create 1018
+  Pop $DirectoryPageDialog
+  StrCmp $DirectoryPageDialog "error" 0 +2
+    Abort
+
+  ${NSD_CreateLabel} 0 0 100% 14u "Choose installation folder."
+  Pop $0
+
+  ${NSD_CreateLabel} 0 18u 100% 24u ""
+  Pop $DirectoryGuideLabel
+
+  ${NSD_CreateDirRequest} 0 46u 78% 12u "$INSTDIR"
+  Pop $DirectoryPathInput
+  ${NSD_OnChange} $DirectoryPathInput OnDirectoryPathChange
+
+  ${NSD_CreateBrowseButton} 80% 46u 20% 12u "Browse..."
+  Pop $DirectoryBrowseButton
+  ${NSD_OnClick} $DirectoryBrowseButton OnDirectoryBrowse
+
+  ${NSD_CreateLabel} 0 62u 100% 24u ""
+  Pop $DirectoryStatusLabel
+
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" 0 standard_guide
+  ${NSD_SetText} $DirectoryGuideLabel "Portable/custom mode: select the OBS folder that contains bin\\64bit\\obs64.exe."
+  Goto guide_done
+
+standard_guide:
+  ${NSD_SetText} $DirectoryGuideLabel "Standard mode installs to ProgramData plugin layout by default."
+
+guide_done:
+  Call UpdateDirectoryStatus
+  nsDialogs::Show
+FunctionEnd
+
+Function DirectoryPageLeave
+  ${NSD_GetText} $DirectoryPathInput $INSTDIR
+  StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_leave standard_leave
+
+standard_leave:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" standard_obs_root_leave standard_leave_path_check
+
+standard_obs_root_leave:
+  ${NSD_SetText} $DirectoryStatusLabel "That path is an OBS folder. Switch to Portable/custom mode for OBS install directories."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+standard_leave_path_check:
+  StrLen $0 $INSTDIR
+  IntCmp $0 3 standard_invalid standard_invalid directory_valid
+
+standard_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Select a plugin folder path to continue."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+portable_leave:
+  Call NormalizePortableInstallDir
+  StrCmp $0 "1" directory_valid portable_invalid
+
+portable_invalid:
+  ${NSD_SetText} $DirectoryStatusLabel "Portable/custom mode requires an OBS folder containing bin\\64bit\\obs64.exe."
+  SetCtlColors $DirectoryStatusLabel ${STATUS_COLOR_INVALID} transparent
+  Abort
+
+directory_valid:
+FunctionEnd
+
 Function DirectoryPagePre
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_mode standard_mode
 
@@ -100,14 +322,10 @@ portable_mode:
 
 not_detected:
   StrCpy $INSTDIR "$PROGRAMFILES64\obs-studio"
-  StrCmp $PortableDetectNoticeShown "1" portable_text 0
-  MessageBox MB_ICONINFORMATION "OBS installation could not be auto-detected. In Portable/custom mode, click Browse and select the OBS folder that contains bin\\64bit\\obs64.exe."
-  StrCpy $PortableDetectNoticeShown "1"
   Goto portable_text
 
 detected:
   StrCpy $INSTDIR $DetectedObsDir
-  StrCpy $PortableDetectNoticeShown "1"
 
 portable_text:
 FunctionEnd
@@ -204,6 +422,8 @@ Function .onVerifyInstDir
   StrCmp $InstallMode "${INSTALL_MODE_PORTABLE}" portable_verify standard_verify
 
 standard_verify:
+  Call DetectObsRootLikePath
+  StrCmp $0 "1" invalid_standard 0
   StrLen $0 $INSTDIR
   IntCmp $0 3 invalid_standard invalid_standard standard_continue
 
@@ -220,11 +440,9 @@ portable_verify:
   Goto valid
 
 invalid_standard:
-  MessageBox MB_ICONEXCLAMATION "Standard mode requires a plugin folder path (for example C:\\ProgramData\\obs-studio\\plugins\\soul-memory-obs-overlay)."
   Abort
 
 invalid:
-  MessageBox MB_ICONEXCLAMATION "Portable/custom mode requires the OBS installation folder. It must contain bin\\64bit\\obs64.exe (for example C:\\Program Files\\obs-studio)."
   Abort
 valid:
 FunctionEnd
@@ -236,8 +454,9 @@ install_standard:
   Call CleanupLegacyObsRootInstall
 
   SetOutPath "$INSTDIR\bin\64bit"
-  File "${PROJECT_ROOT}\installer\staging\overlay_plugin.dll"
-  File "${PROJECT_ROOT}\installer\staging\overlay-helper.exe"
+  Delete "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}"
+  File /oname=${STANDARD_DLL_NAME} "${PROJECT_ROOT}\installer\staging\${PORTABLE_DLL_NAME}"
+  File "${PROJECT_ROOT}\installer\staging\${HELPER_EXE}"
 
   SetOutPath "$INSTDIR\data\config"
   File "${PROJECT_ROOT}\installer\staging\overlay.toml"
@@ -251,8 +470,8 @@ install_standard:
 
 install_portable:
   SetOutPath "$INSTDIR\obs-plugins\64bit"
-  File "${PROJECT_ROOT}\installer\staging\overlay_plugin.dll"
-  File "${PROJECT_ROOT}\installer\staging\overlay-helper.exe"
+  File "${PROJECT_ROOT}\installer\staging\${PORTABLE_DLL_NAME}"
+  File "${PROJECT_ROOT}\installer\staging\${HELPER_EXE}"
 
   SetOutPath "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"
   File "${PROJECT_ROOT}\installer\staging\overlay.toml"
@@ -264,6 +483,15 @@ install_portable:
   WriteUninstaller "$INSTDIR\obs-overlay-uninstall.exe"
 
 install_done:
+  SetOutPath "$TEMP"
+  File /oname=obs-overlay-enable-module.ps1 "${PROJECT_ROOT}\installer\enable-overlay-module.ps1"
+  nsExec::ExecToStack 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$TEMP\obs-overlay-enable-module.ps1"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" +2 0
+    DetailPrint "OBS module state update warning (exit $0): $1"
+  Delete "$TEMP\obs-overlay-enable-module.ps1"
+
 SectionEnd
 
 Function un.DetectObsInstallDir
@@ -349,7 +577,10 @@ un.cleanup_done:
 FunctionEnd
 
 Section "Uninstall"
-  IfFileExists "$INSTDIR\bin\64bit\overlay_plugin.dll" uninstall_standard uninstall_portable_check
+  IfFileExists "$INSTDIR\bin\64bit\${STANDARD_DLL_NAME}" uninstall_standard uninstall_standard_legacy_check
+
+uninstall_standard_legacy_check:
+  IfFileExists "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}" uninstall_standard uninstall_portable_check
 
 uninstall_standard:
   StrCpy $R9 $INSTDIR
@@ -358,8 +589,9 @@ uninstall_standard:
   StrCpy $INSTDIR $R9
   Call un.CleanupLegacyObsRootInstall
 
-  Delete "$INSTDIR\bin\64bit\overlay_plugin.dll"
-  Delete "$INSTDIR\bin\64bit\overlay-helper.exe"
+  Delete "$INSTDIR\bin\64bit\${STANDARD_DLL_NAME}"
+  Delete "$INSTDIR\bin\64bit\${PORTABLE_DLL_NAME}"
+  Delete "$INSTDIR\bin\64bit\${HELPER_EXE}"
   Delete "$INSTDIR\data\config\overlay.toml"
   Delete "$INSTDIR\data\locale\en-US.ini"
   Delete "$INSTDIR\obs-overlay-uninstall.exe"
@@ -372,11 +604,11 @@ uninstall_standard:
   Goto uninstall_done
 
 uninstall_portable_check:
-  IfFileExists "$INSTDIR\obs-plugins\64bit\overlay_plugin.dll" uninstall_portable uninstall_done
+  IfFileExists "$INSTDIR\obs-plugins\64bit\${PORTABLE_DLL_NAME}" uninstall_portable uninstall_done
 
 uninstall_portable:
-  Delete "$INSTDIR\obs-plugins\64bit\overlay_plugin.dll"
-  Delete "$INSTDIR\obs-plugins\64bit\overlay-helper.exe"
+  Delete "$INSTDIR\obs-plugins\64bit\${PORTABLE_DLL_NAME}"
+  Delete "$INSTDIR\obs-plugins\64bit\${HELPER_EXE}"
   Delete "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config\overlay.toml"
   Delete "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\locale\en-US.ini"
   RMDir "$INSTDIR\data\obs-plugins\soul-memory-obs-overlay\config"

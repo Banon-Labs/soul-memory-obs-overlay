@@ -21,16 +21,49 @@ on:
         required: false
         default: false
         type: boolean
+      runner_labels_json:
+        description: "JSON array for runs-on labels (example: [\"self-hosted\",\"windows\",\"x64\",\"defender-enabled\"])"
+        required: false
+        default: '["windows-latest"]'
+        type: string
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJson(inputs.runner_labels_json) || fromJson('["windows-latest"]') }}
     steps:
+      - name: Show runner selection
+        shell: pwsh
+        run: |
+          $selected = @'
+          ${{ github.event_name == 'workflow_dispatch' && inputs.runner_labels_json || '["windows-latest"]' }}
+          '@
+          $selected = $selected.Trim()
+          Write-Host "Selected runner labels: $selected"
+          Write-Host "Runner name: $env:RUNNER_NAME"
+          Write-Host "Runner OS/arch: $env:RUNNER_OS / $env:RUNNER_ARCH"
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prefer Git Bash over WSL bash
+        shell: pwsh
+        run: |
+          $gitBin = "C:/Program Files/Git/bin"
+          $gitUsrBin = "C:/Program Files/Git/usr/bin"
+          if (-not (Test-Path "$gitBin/bash.exe")) {
+            throw "Git Bash not found at $gitBin/bash.exe"
+          }
+
+          $gitBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          if (Test-Path "$gitUsrBin/bash.exe") {
+            $gitUsrBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          Write-Host "Queued Git Bash directories in PATH for subsequent steps"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,13 +73,31 @@ jobs:
       - name: Install OBS Studio build dependency
         shell: pwsh
         run: |
-          choco install obs-studio -y
-
           $obsDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs.dll -ErrorAction SilentlyContinue | Select-Object -First 1
           $frontendDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs-frontend-api.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+
           if (-not $obsDll -or -not $frontendDll) {
-            throw "Could not find OBS runtime DLLs after installation"
+            $obsZipUrl = "https://github.com/obsproject/obs-studio/releases/download/32.1.0/OBS-Studio-32.1.0-Windows-x64.zip"
+            $obsZipPath = Join-Path $env:RUNNER_TEMP "obs-runtime.zip"
+            $obsExtractRoot = Join-Path $env:RUNNER_TEMP "obs-runtime"
+
+            Write-Host "OBS not found under Program Files; downloading portable runtime from $obsZipUrl"
+            Invoke-WebRequest -Uri $obsZipUrl -OutFile $obsZipPath
+
+            if (Test-Path $obsExtractRoot) {
+              Remove-Item -Path $obsExtractRoot -Recurse -Force
+            }
+
+            Expand-Archive -Path $obsZipPath -DestinationPath $obsExtractRoot -Force
+            $obsDll = Get-ChildItem $obsExtractRoot -Recurse -Filter obs.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+            $frontendDll = Get-ChildItem $obsExtractRoot -Recurse -Filter obs-frontend-api.dll -ErrorAction SilentlyContinue | Select-Object -First 1
           }
+
+          if (-not $obsDll -or -not $frontendDll) {
+            throw "Could not find OBS runtime DLLs in Program Files or downloaded portable package"
+          }
+
+          Write-Host "Using OBS runtime DLLs from: $($obsDll.DirectoryName)"
 
           function New-ImportLib {
             param(
@@ -235,23 +286,120 @@ jobs:
           }
           Copy-Item $installerExe.FullName "release-assets/SoulMemoryOverlay-setup.exe" -Force
 
-      - name: Sign and verify Windows binaries
+      - name: Resolve signing configuration
+        id: signing_config
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WINDOWS_CODESIGN_ALLOW_SELF_SIGNED: ${{ vars.WINDOWS_CODESIGN_ALLOW_SELF_SIGNED }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          WINDOWS_TRUSTED_SIGNING_ENDPOINT: ${{ vars.WINDOWS_TRUSTED_SIGNING_ENDPOINT }}
+          WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME: ${{ vars.WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME }}
+        run: |
+          $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
+          $allowSelfSigned = -not $releaseContext
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $allowSelfSigned = "${{ inputs.allow_self_signed }}" -eq "true"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
+            $allowSelfSigned = $env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED -eq "true"
+          }
+
+          $managedValues = [ordered]@{
+            AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
+            AZURE_TENANT_ID = $env:AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID = $env:AZURE_SUBSCRIPTION_ID
+            WINDOWS_TRUSTED_SIGNING_ENDPOINT = $env:WINDOWS_TRUSTED_SIGNING_ENDPOINT
+            WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME = $env:WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME
+            WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME = $env:WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME
+          }
+
+          $configuredManagedKeys = @(
+            $managedValues.GetEnumerator() |
+              Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Value) } |
+              ForEach-Object { $_.Key }
+          )
+          $requiredManagedKeys = @($managedValues.Keys)
+          $hasManaged = $configuredManagedKeys.Count -eq $requiredManagedKeys.Count
+          $hasAnyManaged = $configuredManagedKeys.Count -gt 0
+
+          if ($hasAnyManaged -and -not $hasManaged) {
+            $missingManaged = @($requiredManagedKeys | Where-Object { $configuredManagedKeys -notcontains $_ })
+            throw "Managed trusted-signing configuration is incomplete. Missing: $($missingManaged -join ', ')"
+          }
+
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
+          if (-not $hasManaged -and -not $hasPfx) {
+            throw "No signing configuration found. Configure managed trusted-signing settings or PFX signing secrets."
+          }
+
+          $signingMode = if ($hasManaged) { "managed" } else { "pfx" }
+
+          Write-Host "Signing mode: $signingMode"
+          Write-Host "Release context: $releaseContext"
+          Write-Host "Self-signed allowance enabled: $allowSelfSigned"
+
+          "signing_mode=$signingMode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_context=$($releaseContext.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "allow_self_signed=$($allowSelfSigned.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Azure login (managed trusted-signing)
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign binaries with Azure Artifact Signing
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.WINDOWS_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.WINDOWS_TRUSTED_SIGNING_CERT_PROFILE_NAME }}
+          files: |
+            release-assets/overlay_plugin.dll
+            release-assets/overlay-helper.exe
+            release-assets/SoulMemoryOverlay-setup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+          timestamp-digest: SHA256
+
+      - name: Verify signed Windows binaries (managed mode)
+        if: steps.signing_config.outputs.signing_mode == 'managed'
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $releaseContext = "${{ steps.signing_config.outputs.release_context }}" -eq "true"
+          $allowSelfSigned = "${{ steps.signing_config.outputs.allow_self_signed }}" -eq "true"
+
+          ./scripts/sign-windows-artifacts.ps1 `
+            -Files @(
+              "release-assets/overlay_plugin.dll",
+              "release-assets/overlay-helper.exe",
+              "release-assets/SoulMemoryOverlay-setup.exe"
+            ) `
+            -ReportPath "release-assets/signing-report.json" `
+            -ReleaseContext:$releaseContext `
+            -AllowSelfSignedUntrusted:$allowSelfSigned `
+            -SkipSigning
+
+      - name: Sign and verify Windows binaries (PFX mode)
+        if: steps.signing_config.outputs.signing_mode == 'pfx'
         timeout-minutes: 15
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
           WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
           WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODESIGN_TIMESTAMP_URL }}
-          WINDOWS_CODESIGN_ALLOW_SELF_SIGNED: ${{ vars.WINDOWS_CODESIGN_ALLOW_SELF_SIGNED }}
         run: |
-          $releaseContext = "${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}" -eq "true"
-          $allowSelfSigned = $false
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $allowSelfSigned = "${{ inputs.allow_self_signed }}" -eq "true"
-          }
-          if (-not $allowSelfSigned -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED)) {
-            $allowSelfSigned = $env:WINDOWS_CODESIGN_ALLOW_SELF_SIGNED -eq "true"
-          }
+          $releaseContext = "${{ steps.signing_config.outputs.release_context }}" -eq "true"
+          $allowSelfSigned = "${{ steps.signing_config.outputs.allow_self_signed }}" -eq "true"
 
           Write-Host "Self-signed allowance enabled: $allowSelfSigned"
 
@@ -335,15 +483,27 @@ jobs:
           )
 
           $mpCmdRun = Resolve-MpCmdRun
+          $hasPreferenceCmd = $null -ne (Get-Command Get-MpPreference -ErrorAction SilentlyContinue)
           $hasThreatCmd = $null -ne (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue)
+          $hasStatusCmd = $null -ne (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)
           $report = @()
 
-          if (-not $mpCmdRun -or -not $hasThreatCmd) {
-            $reason = if (-not $mpCmdRun) {
-              "MpCmdRun.exe is unavailable on runner"
-            } else {
-              "Get-MpThreatDetection is unavailable on runner"
+          if (-not $mpCmdRun -or -not $hasThreatCmd -or -not $hasPreferenceCmd -or -not $hasStatusCmd) {
+            $missing = @()
+            if (-not $mpCmdRun) {
+              $missing += "MpCmdRun.exe"
             }
+            if (-not $hasThreatCmd) {
+              $missing += "Get-MpThreatDetection"
+            }
+            if (-not $hasPreferenceCmd) {
+              $missing += "Get-MpPreference"
+            }
+            if (-not $hasStatusCmd) {
+              $missing += "Get-MpComputerStatus"
+            }
+
+            $reason = "Defender tooling unavailable on runner: $($missing -join ', ')"
 
             $report += [pscustomobject]@{
               asset = "(all)"
@@ -358,6 +518,57 @@ jobs:
 
             if ($releaseContext) {
               throw $reason
+            }
+
+            Write-Warning $reason
+            return
+          }
+
+          $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+          $preference = Get-MpPreference -ErrorAction SilentlyContinue
+          $environmentIssues = @()
+
+          if ($status) {
+            if (-not $status.AMServiceEnabled) {
+              $environmentIssues += "AM service is disabled"
+            }
+            if (-not $status.AntivirusEnabled) {
+              $environmentIssues += "Antivirus engine is disabled"
+            }
+            if ($status.RealTimeProtectionEnabled -eq $false) {
+              $environmentIssues += "Real-time protection is disabled"
+            }
+          } else {
+            $environmentIssues += "Get-MpComputerStatus did not return status data"
+          }
+
+          if ($preference) {
+            $excludedRoots = @($preference.ExclusionPath | Where-Object { $_ -is [string] } | ForEach-Object { $_.Trim().ToLowerInvariant() })
+            $globalRootExclusions = @($excludedRoots | Where-Object { $_ -match '^[a-z]:\\$' -or $_ -match '^[a-z]:$' })
+            if ($globalRootExclusions.Count -gt 0) {
+              $environmentIssues += "Full drive exclusions configured: $($globalRootExclusions -join ', ')"
+            }
+          } else {
+            $environmentIssues += "Get-MpPreference did not return preference data"
+          }
+
+          if ($environmentIssues.Count -gt 0) {
+            $reason = "Defender environment cannot provide meaningful on-demand file scans on this runner. $($environmentIssues -join '; ')"
+
+            $report += [pscustomobject]@{
+              asset = "(environment)"
+              detected = $null
+              threat_name = $null
+              severity = $null
+              scan_exit_code = $null
+              scan_status = "unscannable-environment"
+              detail = $reason
+            }
+
+            $report | ConvertTo-Json -Depth 5 | Out-File -FilePath "release-assets/defender-scan-report.json" -Encoding utf8
+
+            if ($releaseContext) {
+              throw "$reason Use a Windows runner with Defender AV enabled and without full-drive exclusions."
             }
 
             Write-Warning $reason

@@ -9,7 +9,8 @@ param(
   [string]$PfxPassword = $env:WINDOWS_CODESIGN_PFX_PASSWORD,
   [switch]$ReleaseContext,
   [int]$SignTimeoutSeconds = 180,
-  [bool]$AllowSelfSignedUntrusted = $false
+  [bool]$AllowSelfSignedUntrusted = $false,
+  [switch]$SkipSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -125,49 +126,54 @@ Write-Host "Using signtool: $signTool"
 $report = @()
 $cleanupPfx = $false
 
-if ([string]::IsNullOrWhiteSpace($PfxPath)) {
-  $hasPfx = -not [string]::IsNullOrWhiteSpace($PfxBase64)
-  $hasPassword = -not [string]::IsNullOrWhiteSpace($PfxPassword)
+if (-not $SkipSigning) {
+  if ([string]::IsNullOrWhiteSpace($PfxPath)) {
+    $hasPfx = -not [string]::IsNullOrWhiteSpace($PfxBase64)
+    $hasPassword = -not [string]::IsNullOrWhiteSpace($PfxPassword)
 
-  if (-not ($hasPfx -and $hasPassword)) {
-    $reason = "Signing secrets are not configured. Set WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD."
-    foreach ($file in $Files) {
-      $report += [pscustomobject]@{
-        file = $file
-        status = "NotSigned"
-        signed = $false
-        signer = $null
-        timestamp = $null
-        reason = "missing-signing-secrets"
+    if (-not ($hasPfx -and $hasPassword)) {
+      $reason = "Signing secrets are not configured. Set WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD."
+      foreach ($file in $Files) {
+        $report += [pscustomobject]@{
+          file = $file
+          status = "NotSigned"
+          signed = $false
+          signer = $null
+          timestamp = $null
+          reason = "missing-signing-secrets"
+        }
       }
+
+      $reportDir = Split-Path -Parent $ReportPath
+      if ($reportDir -and -not (Test-Path $reportDir)) {
+        New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+      }
+      $report | ConvertTo-Json -Depth 4 | Out-File -FilePath $ReportPath -Encoding utf8
+
+      if ($ReleaseContext) {
+        throw $reason
+      }
+
+      Write-Warning $reason
+      exit 0
     }
 
-    $reportDir = Split-Path -Parent $ReportPath
-    if ($reportDir -and -not (Test-Path $reportDir)) {
-      New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
-    }
-    $report | ConvertTo-Json -Depth 4 | Out-File -FilePath $ReportPath -Encoding utf8
-
-    if ($ReleaseContext) {
-      throw $reason
-    }
-
-    Write-Warning $reason
-    exit 0
+    Write-Host "Materializing PFX from base64 secret..."
+    $PfxPath = Join-Path $env:TEMP "windows-codesign.pfx"
+    [IO.File]::WriteAllBytes($PfxPath, [Convert]::FromBase64String($PfxBase64))
+    $cleanupPfx = $true
   }
 
-  Write-Host "Materializing PFX from base64 secret..."
-  $PfxPath = Join-Path $env:TEMP "windows-codesign.pfx"
-  [IO.File]::WriteAllBytes($PfxPath, [Convert]::FromBase64String($PfxBase64))
-  $cleanupPfx = $true
-}
+  if ([string]::IsNullOrWhiteSpace($PfxPassword)) {
+    throw "PFX password is required."
+  }
 
-if ([string]::IsNullOrWhiteSpace($PfxPassword)) {
-  throw "PFX password is required."
+  if (-not (Test-Path $PfxPath)) {
+    throw "PFX file not found: $PfxPath"
+  }
 }
-
-if (-not (Test-Path $PfxPath)) {
-  throw "PFX file not found: $PfxPath"
+else {
+  Write-Host "SkipSigning enabled; validating existing signatures only."
 }
 
 try {
@@ -178,41 +184,46 @@ try {
       throw "File to sign not found: $file"
     }
 
-    Write-Host "Signing file: $file"
+    if (-not $SkipSigning) {
+      Write-Host "Signing file: $file"
 
-    $baseArgs = @("sign", "/fd", "SHA256", "/f", $PfxPath, "/p", $PfxPassword)
-    $argsWithTimestamp = $baseArgs + @("/tr", $TimestampUrl, "/td", "SHA256", $file)
-    $argsWithoutTimestamp = $baseArgs + @($file)
+      $baseArgs = @("sign", "/fd", "SHA256", "/f", $PfxPath, "/p", $PfxPassword)
+      $argsWithTimestamp = $baseArgs + @("/tr", $TimestampUrl, "/td", "SHA256", $file)
+      $argsWithoutTimestamp = $baseArgs + @($file)
 
-    $result = Invoke-SignTool -SignToolPath $signTool -Arguments $argsWithTimestamp -TimeoutSeconds $SignTimeoutSeconds
-    if ($result.TimedOut) {
-      throw "signtool timed out after $SignTimeoutSeconds seconds for ${file}. stdout: $($result.StdOut) stderr: $($result.StdErr)"
-    }
+      $result = Invoke-SignTool -SignToolPath $signTool -Arguments $argsWithTimestamp -TimeoutSeconds $SignTimeoutSeconds
+      if ($result.TimedOut) {
+        throw "signtool timed out after $SignTimeoutSeconds seconds for ${file}. stdout: $($result.StdOut) stderr: $($result.StdErr)"
+      }
 
-    if ($result.ExitCode -ne 0) {
-      Write-Warning "Timestamped signing failed for ${file}. Retrying without timestamp."
+      if ($result.ExitCode -ne 0) {
+        Write-Warning "Timestamped signing failed for ${file}. Retrying without timestamp."
+        if ($result.StdOut) {
+          Write-Host $result.StdOut
+        }
+        if ($result.StdErr) {
+          Write-Host $result.StdErr
+        }
+
+        $retry = Invoke-SignTool -SignToolPath $signTool -Arguments $argsWithoutTimestamp -TimeoutSeconds $SignTimeoutSeconds
+        if ($retry.TimedOut) {
+          throw "signtool retry timed out after $SignTimeoutSeconds seconds for ${file}. stdout: $($retry.StdOut) stderr: $($retry.StdErr)"
+        }
+        if ($retry.ExitCode -ne 0) {
+          throw "signtool sign failed for ${file} (exit code $($retry.ExitCode)). stdout: $($retry.StdOut) stderr: $($retry.StdErr)"
+        }
+        $result = $retry
+      }
+
       if ($result.StdOut) {
         Write-Host $result.StdOut
       }
       if ($result.StdErr) {
         Write-Host $result.StdErr
       }
-
-      $retry = Invoke-SignTool -SignToolPath $signTool -Arguments $argsWithoutTimestamp -TimeoutSeconds $SignTimeoutSeconds
-      if ($retry.TimedOut) {
-        throw "signtool retry timed out after $SignTimeoutSeconds seconds for ${file}. stdout: $($retry.StdOut) stderr: $($retry.StdErr)"
-      }
-      if ($retry.ExitCode -ne 0) {
-        throw "signtool sign failed for ${file} (exit code $($retry.ExitCode)). stdout: $($retry.StdOut) stderr: $($retry.StdErr)"
-      }
-      $result = $retry
     }
-
-    if ($result.StdOut) {
-      Write-Host $result.StdOut
-    }
-    if ($result.StdErr) {
-      Write-Host $result.StdErr
+    else {
+      Write-Host "SkipSigning: verifying existing signature for $file"
     }
 
     $signature = Get-AuthenticodeSignature -FilePath $file
