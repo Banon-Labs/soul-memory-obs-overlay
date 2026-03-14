@@ -765,7 +765,7 @@ mod windows_plugin {
                         "-fsSL",
                         "-H",
                         "User-Agent: soul-memory-obs-overlay",
-                        "https://api.github.com/repos/chozandrias76/soul-memory-obs-overlay/releases/latest",
+                        "https://api.github.com/repos/Banon-Labs/soul-memory-obs-overlay/releases/latest",
                     ])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null())
