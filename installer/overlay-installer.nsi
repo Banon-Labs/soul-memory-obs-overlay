@@ -77,6 +77,7 @@ Function .onInit
   StrCmp $ProgramDataDir "" 0 +2
     StrCpy $ProgramDataDir "C:\ProgramData"
   Call DetectObsInstallDir
+  IfSilent on_init_done 0
 
   StrCmp $ObsPathDetected "1" 0 on_init_done
   StrCpy $0 $DetectedObsDir
