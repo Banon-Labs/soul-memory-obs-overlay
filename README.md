@@ -19,6 +19,7 @@ The plugin auto-starts the helper process when the source is active.
   - **Portable/custom OBS** installs to OBS root layout (`obs-plugins/64bit` and `data/obs-plugins/...`).
 - Mode/path rule: OBS installation folders (`...\obs-studio` containing `bin\64bit\obs64.exe`) should use **Portable/custom** mode. Standard mode is for ProgramData plugin layout paths.
 - In Portable/custom mode, the installer validates that the selected folder contains `bin\64bit\obs64.exe`.
+- If OBS is detected outside the default Program Files path (for example `D:\Obs`), the installer defaults to **Portable/custom OBS** automatically.
 - The installer aborts if OBS is running, so source-type registration is picked up cleanly on next launch.
 - If OBS auto-detection fails in Portable/custom mode, use **Browse** and select the correct OBS folder manually.
 - During Standard-mode upgrades, the installer removes this plugin's legacy OBS-root files from the detected OBS installation to prevent duplicate loads.

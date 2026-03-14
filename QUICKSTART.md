@@ -21,6 +21,7 @@ When Dark Souls II: Scholar of the First Sin is running, the source shows your S
 3. Finish the installer
    - Choose **Standard (recommended)** to install to `C:\ProgramData\obs-studio\plugins\soul-memory-obs-overlay`.
    - Choose **Portable/custom OBS** only when needed, then select the OBS folder that contains `bin\64bit\obs64.exe`.
+   - If OBS is found in a custom path (for example `D:\Obs`), the installer defaults to **Portable/custom OBS** automatically.
    - If you point at an OBS install folder, use **Portable/custom OBS**. Do not use Standard mode for an OBS root path.
    - In Portable/custom mode, the installer will not continue until a valid OBS folder is selected.
 4. Open OBS Studio

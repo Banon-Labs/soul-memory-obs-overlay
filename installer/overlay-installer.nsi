@@ -77,6 +77,15 @@ Function .onInit
   StrCmp $ProgramDataDir "" 0 +2
     StrCpy $ProgramDataDir "C:\ProgramData"
   Call DetectObsInstallDir
+
+  StrCmp $ObsPathDetected "1" 0 on_init_done
+  StrCmp $DetectedObsDir "$PROGRAMFILES64\obs-studio" on_init_done 0
+  StrCmp $DetectedObsDir "$PROGRAMFILES\obs-studio" on_init_done 0
+  StrCpy $InstallMode "${INSTALL_MODE_PORTABLE}"
+  StrCmp $DetectedObsDir "" on_init_done 0
+    StrCpy $INSTDIR "$DetectedObsDir"
+
+on_init_done:
 FunctionEnd
 
 Function InstallModePageCreate
