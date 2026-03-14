@@ -72,13 +72,31 @@ jobs:
       - name: Install OBS Studio build dependency
         shell: pwsh
         run: |
-          choco install obs-studio -y
-
           $obsDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs.dll -ErrorAction SilentlyContinue | Select-Object -First 1
           $frontendDll = Get-ChildItem "C:/Program Files/obs-studio" -Recurse -Filter obs-frontend-api.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+
           if (-not $obsDll -or -not $frontendDll) {
-            throw "Could not find OBS runtime DLLs after installation"
+            $obsZipUrl = "https://github.com/obsproject/obs-studio/releases/download/32.1.0/OBS-Studio-32.1.0-Windows-x64.zip"
+            $obsZipPath = Join-Path $env:RUNNER_TEMP "obs-runtime.zip"
+            $obsExtractRoot = Join-Path $env:RUNNER_TEMP "obs-runtime"
+
+            Write-Host "OBS not found under Program Files; downloading portable runtime from $obsZipUrl"
+            Invoke-WebRequest -Uri $obsZipUrl -OutFile $obsZipPath
+
+            if (Test-Path $obsExtractRoot) {
+              Remove-Item -Path $obsExtractRoot -Recurse -Force
+            }
+
+            Expand-Archive -Path $obsZipPath -DestinationPath $obsExtractRoot -Force
+            $obsDll = Get-ChildItem $obsExtractRoot -Recurse -Filter obs.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+            $frontendDll = Get-ChildItem $obsExtractRoot -Recurse -Filter obs-frontend-api.dll -ErrorAction SilentlyContinue | Select-Object -First 1
           }
+
+          if (-not $obsDll -or -not $frontendDll) {
+            throw "Could not find OBS runtime DLLs in Program Files or downloaded portable package"
+          }
+
+          Write-Host "Using OBS runtime DLLs from: $($obsDll.DirectoryName)"
 
           function New-ImportLib {
             param(
